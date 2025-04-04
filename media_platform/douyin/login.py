@@ -103,8 +103,8 @@ class DouYinLogin(AbstractLogin):
         """If the login dialog box does not pop up automatically, we will manually click the login button"""
         dialog_selector = "xpath=//div[@id='login-pannel']"
         try:
-            # check dialog box is auto popup and wait for 10 seconds
-            await self.context_page.wait_for_selector(dialog_selector, timeout=1000 * 10)
+            # check dialog box is auto popup and wait for 300 seconds
+            await self.context_page.wait_for_selector(dialog_selector, timeout=1000 * 300)
         except Exception as e:
             utils.logger.error(f"[DouYinLogin.popup_login_dialog] login dialog box does not pop up automatically, error: {e}")
             utils.logger.info("[DouYinLogin.popup_login_dialog] login dialog box does not pop up automatically, we will manually click the login button")
@@ -167,7 +167,7 @@ class DouYinLogin(AbstractLogin):
         # 等待滑动验证码的出现
         back_selector = "#captcha-verify-image"
         try:
-            await self.context_page.wait_for_selector(selector=back_selector, state="visible", timeout=30 * 1000)
+            await self.context_page.wait_for_selector(selector=back_selector, state="visible", timeout=300 * 1000)
         except PlaywrightTimeoutError:  # 没有滑动验证码，直接返回
             return
 
@@ -214,14 +214,14 @@ class DouYinLogin(AbstractLogin):
         # get slider background image
         slider_back_elements = await self.context_page.wait_for_selector(
             selector=back_selector,
-            timeout=1000 * 10,  # wait 10 seconds
+            timeout=1000 * 300,  # wait 300 seconds
         )
         slide_back = str(await slider_back_elements.get_property("src")) # type: ignore
 
         # get slider gap image
         gap_elements = await self.context_page.wait_for_selector(
             selector=gap_selector,
-            timeout=1000 * 10,  # wait 10 seconds
+            timeout=1000 * 300,  # wait 300 seconds
         )
         gap_src = str(await gap_elements.get_property("src")) # type: ignore
 
