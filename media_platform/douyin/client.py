@@ -504,6 +504,7 @@ class DOUYINClient(AbstractApiClient):
             
             # 设置网络请求监听
             follow_request_seen = False
+            follow_success = False
             
             def handle_request(request):
                 nonlocal follow_request_seen
@@ -514,92 +515,130 @@ class DOUYINClient(AbstractApiClient):
             # 添加请求监听（不需要await）
             self.playwright_page.on("request", handle_request)
             
+            # 定义检查按钮状态的函数
+            async def check_button_status(button):
+                try:
+                    if not button:
+                        return False
+                    current_text = await button.text_content()
+                    current_class = await button.get_attribute("class")
+                    utils.logger.info(f"按钮状态 - 文本: {current_text}, class: {current_class}")
+                    return "已关注" in current_text or "关注中" in current_text
+                except:
+                    return False
+            
             # 尝试点击
             try:
-                # 先尝试使用evaluate click
+                # 使用evaluate进行一次完整的点击操作
                 await self.playwright_page.evaluate("""(button) => {
-                    // 模拟真实的鼠标事件
-                    const rect = button.getBoundingClientRect();
-                    const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
-                    events.forEach(eventType => {
-                        const event = new MouseEvent(eventType, {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true,
-                            clientX: rect.left + rect.width / 2,
-                            clientY: rect.top + rect.height / 2
+                    return new Promise((resolve) => {
+                        // 模拟真实的鼠标事件序列
+                        const rect = button.getBoundingClientRect();
+                        const centerX = rect.left + rect.width / 2;
+                        const centerY = rect.top + rect.height / 2;
+                        
+                        const events = [
+                            new MouseEvent('mouseenter', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: centerX,
+                                clientY: centerY
+                            }),
+                            new MouseEvent('mousedown', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: centerX,
+                                clientY: centerY,
+                                buttons: 1
+                            }),
+                            new MouseEvent('mouseup', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: centerX,
+                                clientY: centerY
+                            }),
+                            new MouseEvent('click', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: centerX,
+                                clientY: centerY
+                            })
+                        ];
+                        
+                        // 按顺序触发事件
+                        events.forEach((event, index) => {
+                            setTimeout(() => {
+                                button.dispatchEvent(event);
+                                if (index === events.length - 1) {
+                                    resolve();
+                                }
+                            }, index * 50);  // 每个事件间隔50ms
                         });
-                        button.dispatchEvent(event);
                     });
                 }""", follow_button)
                 utils.logger.info("JavaScript事件模拟完成")
                 
-                await asyncio.sleep(1)  # 等待事件生效
+                # 等待一小段时间看是否有响应
+                await asyncio.sleep(1)
                 
-                # 然后使用click方法
-                await follow_button.click(force=True, delay=100)  # 添加force=True强制点击
-                utils.logger.info("元素click方法完成")
+                # 检查按钮状态
+                if await check_button_status(follow_button):
+                    utils.logger.info("JavaScript点击后检测到关注成功")
+                    return {"status_code": 0, "status_msg": "success"}
                 
-                await asyncio.sleep(1)  # 等待点击生效
-                
-                # 最后使用mouse.click
-                await self.playwright_page.mouse.click(
-                    button_box["x"] + button_box["width"] / 2,
-                    button_box["y"] + button_box["height"] / 2,
-                    delay=100  # 添加点击延迟
-                )
-                utils.logger.info("鼠标点击完成")
-                
-                # 等待可能的关注请求
-                start_time = asyncio.get_event_loop().time()
-                while not follow_request_seen and (asyncio.get_event_loop().time() - start_time) < 10:
-                    await asyncio.sleep(0.5)
+                # 如果JavaScript点击不成功，尝试使用Playwright的click
+                if not follow_success and not follow_request_seen:
+                    await follow_button.click(force=True, delay=100)
+                    utils.logger.info("Playwright click完成")
+                    await asyncio.sleep(1)
                     
-                    # 在等待过程中检查按钮状态
-                    try:
-                        # 使用原始选择器重新获取按钮
-                        current_button = await self.playwright_page.query_selector(original_button["selector"])
-                        if current_button:
-                            current_box = await current_button.bounding_box()
-                            if current_box and abs(current_box["x"] - original_button["x"]) < 50:  # 确保是同一个按钮
-                                current_text = await current_button.text_content()
-                                current_class = await current_button.get_attribute("class")
-                                utils.logger.info(f"等待过程中按钮状态 - 文本: {current_text}, class: {current_class}")
-                                if "已关注" in current_text or "关注中" in current_text:
-                                    utils.logger.info(f"点击后按钮文本变为: {current_text}")
-                                    return {"status_code": 0, "status_msg": "success"}
-                    except:
-                        pass  # 忽略检查错误
+                    # 再次检查状态
+                    if await check_button_status(follow_button):
+                        utils.logger.info("Playwright click后检测到关注成功")
+                        return {"status_code": 0, "status_msg": "success"}
                 
-                if follow_request_seen:
-                    utils.logger.info("已检测到关注请求")
-                else:
-                    utils.logger.warning("未检测到关注请求，但继续检查状态")
+                # 如果还是不成功，最后尝试mouse.click
+                if not follow_success and not follow_request_seen:
+                    await self.playwright_page.mouse.click(
+                        button_box["x"] + button_box["width"] / 2,
+                        button_box["y"] + button_box["height"] / 2,
+                        delay=100
+                    )
+                    utils.logger.info("鼠标点击完成")
                     
-                    # 如果没有检测到请求，尝试直接调用API
+                    # 等待并检查结果
+                    start_time = asyncio.get_event_loop().time()
+                    while not follow_request_seen and (asyncio.get_event_loop().time() - start_time) < 5:  # 减少等待时间到5秒
+                        await asyncio.sleep(0.5)
+                        if await check_button_status(follow_button):
+                            utils.logger.info("鼠标点击后检测到关注成功")
+                            return {"status_code": 0, "status_msg": "success"}
+                
+                # 如果UI操作都失败了，尝试API调用
+                if not follow_success and not follow_request_seen:
+                    utils.logger.info("尝试使用API发送关注请求")
                     try:
-                        utils.logger.info("尝试使用API发送关注请求")
                         uri = "/aweme/v1/web/commit/follow/user/"
                         params = {
                             "sec_user_id": sec_user_id,
                             "from": "0",
                             "from_pre": "0",
                             "enter_from": "homepage",
-                            "type": "1"  # 添加type参数
+                            "type": "1"
                         }
                         headers = copy.copy(self.headers)
                         headers["Referer"] = f"https://www.douyin.com/user/{sec_user_id}"
-                        headers["Content-Type"] = "application/x-www-form-urlencoded"  # 添加Content-Type
-                        headers["Accept"] = "application/json, text/plain, */*"  # 添加Accept
+                        headers["Content-Type"] = "application/x-www-form-urlencoded"
+                        headers["Accept"] = "application/json, text/plain, */*"
                         
-                        # 添加X-Secsdk-Csrf-Token
-                        csrf_token = ""
-                        try:
-                            csrf_token = await self.playwright_page.evaluate("""() => {
-                                return document.cookie.split('; ').find(row => row.startsWith('csrf_session_id=')).split('=')[1]
-                            }""")
-                        except:
-                            pass
+                        csrf_token = await self.playwright_page.evaluate("""() => {
+                            const match = document.cookie.match(/csrf_session_id=([^;]+)/);
+                            return match ? match[1] : '';
+                        }""")
                         
                         if csrf_token:
                             headers["X-Secsdk-Csrf-Token"] = csrf_token
@@ -613,60 +652,25 @@ class DOUYINClient(AbstractApiClient):
                     except Exception as api_e:
                         utils.logger.error(f"API关注请求异常: {str(api_e)}")
                 
-                # 等待页面稳定
-                await asyncio.sleep(2)
+                # 最后检查一次按钮状态
+                await asyncio.sleep(1)
+                current_button = await self.playwright_page.query_selector(original_button["selector"])
+                if not current_button:
+                    utils.logger.info("无法找到关注按钮，可能已变为已关注状态")
+                    return {"status_code": 0, "status_msg": "success"}
                 
-                # 多次检查按钮状态
-                max_retries = 5  # 增加重试次数
-                for i in range(max_retries):
-                    try:
-                        # 使用原始选择器重新获取按钮
-                        current_button = await self.playwright_page.query_selector(original_button["selector"])
-                        if not current_button:
-                            utils.logger.info("找不到原按钮，尝试其他选择器")
-                            for selector in selectors:
-                                temp_button = await self.playwright_page.query_selector(selector)
-                                if temp_button:
-                                    temp_box = await temp_button.bounding_box()
-                                    if temp_box and abs(temp_box["x"] - original_button["x"]) < 50:
-                                        current_button = temp_button
-                                        break
-                        
-                        if not current_button:
-                            utils.logger.info("无法找到关注按钮，可能已变为已关注状态")
-                            return {"status_code": 0, "status_msg": "success"}
-                        
-                        button_text_after = await current_button.text_content()
-                        button_class_after = await current_button.get_attribute("class")
-                        utils.logger.info(f"第{i+1}次检查 - 按钮文本: {button_text_after}, class: {button_class_after}")
-                        
-                        # 检查按钮状态变化
-                        if "已关注" in button_text_after or "关注中" in button_text_after:
-                            utils.logger.info("关注操作成功")
-                            return {"status_code": 0, "status_msg": "success"}
-                        
-                        # 如果按钮文本还是"关注"，可能需要重试点击
-                        if i < max_retries - 1 and button_text_after == "关注":
-                            utils.logger.info("按钮状态未变化，尝试重新点击...")
-                            await current_button.click(force=True, delay=100)
-                            await asyncio.sleep(2)
-                        
-                        if i < max_retries - 1:
-                            utils.logger.info("继续等待状态变化...")
-                            await asyncio.sleep(2)
-                    except Exception as check_e:
-                        utils.logger.error(f"第{i+1}次检查时出错: {str(check_e)}")
-                        if i < max_retries - 1:
-                            continue
+                if await check_button_status(current_button):
+                    utils.logger.info("最终检查时发现关注成功")
+                    return {"status_code": 0, "status_msg": "success"}
                 
-                utils.logger.error("多次检查后未发现状态变化")
+                utils.logger.error("所有尝试都失败，未能完成关注操作")
                 return None
                 
             except Exception as e:
                 utils.logger.error(f"点击或验证过程出错: {str(e)}")
                 return None
             finally:
-                # 移除请求监听（不需要await）
+                # 移除请求监听
                 self.playwright_page.remove_listener("request", handle_request)
             
         except Exception as e:
