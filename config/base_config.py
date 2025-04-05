@@ -47,6 +47,14 @@ HEADLESS = False  # 设置为False，方便查看登录状态
 # 是否保存登录状态
 SAVE_LOGIN_STATE = True
 
+# 数据库配置
+RELATION_DB_HOST = "localhost"
+RELATION_DB_PORT = 3306
+RELATION_DB_USER = "root"
+RELATION_DB_PWD = "123456"
+RELATION_DB_NAME = "media_crawler"
+RELATION_DB_CHARSET = "utf8mb4"
+
 # 数据保存类型选项配置,支持三种类型：csv、db、json, 最好保存到DB，有排重的功能。
 SAVE_DATA_OPTION = "db"  # csv or db or json
 

@@ -35,9 +35,11 @@ class DouYinCrawler(AbstractCrawler):
     context_page: Page
     dy_client: DOUYINClient
     browser_context: BrowserContext
+    playwright: Any
 
     def __init__(self) -> None:
         self.index_url = "https://www.douyin.com"
+        self.playwright = None
 
     async def start(self) -> None:
         playwright_proxy_format, httpx_proxy_format = None, None
@@ -46,43 +48,44 @@ class DouYinCrawler(AbstractCrawler):
             ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = self.format_proxy_info(ip_proxy_info)
 
-        async with async_playwright() as playwright:
-            # Launch a browser context.
-            chromium = playwright.chromium
-            self.browser_context = await self.launch_browser(
-                chromium,
-                None,
-                user_agent=None,
-                headless=config.HEADLESS
+        self.playwright = await async_playwright().start()
+        # Launch a browser context.
+        chromium = self.playwright.chromium
+        self.browser_context = await self.launch_browser(
+            chromium,
+            None,
+            user_agent=None,
+            headless=config.HEADLESS
+        )
+        # stealth.min.js is a js script to prevent the website from detecting the crawler.
+        await self.browser_context.add_init_script(path="libs/stealth.min.js")
+        self.context_page = await self.browser_context.new_page()
+        await self.context_page.goto(self.index_url)
+
+        self.dy_client = await self.create_douyin_client(httpx_proxy_format)
+        if not await self.dy_client.pong(browser_context=self.browser_context):
+            login_obj = DouYinLogin(
+                login_type=config.LOGIN_TYPE,
+                login_phone="",  # you phone number
+                browser_context=self.browser_context,
+                context_page=self.context_page,
+                cookie_str=config.COOKIES
             )
-            # stealth.min.js is a js script to prevent the website from detecting the crawler.
-            await self.browser_context.add_init_script(path="libs/stealth.min.js")
-            self.context_page = await self.browser_context.new_page()
-            await self.context_page.goto(self.index_url)
+            await login_obj.begin()
+            await self.dy_client.update_cookies(browser_context=self.browser_context)
 
-            self.dy_client = await self.create_douyin_client(httpx_proxy_format)
-            if not await self.dy_client.pong(browser_context=self.browser_context):
-                login_obj = DouYinLogin(
-                    login_type=config.LOGIN_TYPE,
-                    login_phone="",  # you phone number
-                    browser_context=self.browser_context,
-                    context_page=self.context_page,
-                    cookie_str=config.COOKIES
-                )
-                await login_obj.begin()
-                await self.dy_client.update_cookies(browser_context=self.browser_context)
-            crawler_type_var.set(config.CRAWLER_TYPE)
-            if config.CRAWLER_TYPE == "search":
-                # Search for notes and retrieve their comment information.
-                await self.search()
-            elif config.CRAWLER_TYPE == "detail":
-                # Get the information and comments of the specified post
-                await self.get_specified_awemes()
-            elif config.CRAWLER_TYPE == "creator":
-                # Get the information and comments of the specified creator
-                await self.get_creators_and_videos()
+        utils.logger.info("[DouYinCrawler.start] Douyin Crawler started successfully...")
 
-            utils.logger.info("[DouYinCrawler.start] Douyin Crawler finished ...")
+        crawler_type_var.set(config.CRAWLER_TYPE)
+        if config.CRAWLER_TYPE == "search":
+            # Search for notes and retrieve their comment information.
+            await self.search()
+        elif config.CRAWLER_TYPE == "detail":
+            # Get the information and comments of the specified post
+            await self.get_specified_awemes()
+        elif config.CRAWLER_TYPE == "creator":
+            # Get the information and comments of the specified creator
+            await self.get_creators_and_videos()
 
     async def search(self) -> None:
         utils.logger.info("[DouYinCrawler.search] Begin search douyin keywords")
@@ -281,5 +284,106 @@ class DouYinCrawler(AbstractCrawler):
 
     async def close(self) -> None:
         """Close browser context"""
-        await self.browser_context.close()
+        if self.browser_context:
+            await self.browser_context.close()
+        if self.playwright:
+            await self.playwright.stop()
         utils.logger.info("[DouYinCrawler.close] Browser context closed ...")
+
+    async def search_and_follow_user(self, user_keyword: str) -> None:
+        """
+        搜索用户并关注
+        :param user_keyword: 用户关键词
+        """
+        utils.logger.info(f"[DouYinCrawler.search_and_follow_user] Begin search douyin user: {user_keyword}")
+        try:
+            search_res = await self.dy_client.search_user_by_keyword(keyword=user_keyword)
+            if "user_list" not in search_res:
+                utils.logger.error(f"[DouYinCrawler.search_and_follow_user] search user failed, response: {search_res}")
+                return
+            
+            user_list = search_res.get("user_list", [])
+            if not user_list:
+                utils.logger.info(f"[DouYinCrawler.search_and_follow_user] No user found for keyword: {user_keyword}")
+                return
+                
+            # 获取第一个用户
+            first_user = user_list[0]
+            user_info = first_user.get("user_info", {})
+            sec_user_id = user_info.get("sec_uid", "")
+            nickname = user_info.get("nickname", "")
+            
+            if not sec_user_id:
+                utils.logger.error(f"[DouYinCrawler.search_and_follow_user] Cannot get sec_user_id for user: {nickname}")
+                return
+                
+            # 关注用户
+            utils.logger.info(f"[DouYinCrawler.search_and_follow_user] Following user: {nickname}")
+            follow_res = await self.dy_client.follow_user(sec_user_id)
+            utils.logger.info(f"[DouYinCrawler.search_and_follow_user] Follow result: {follow_res}")
+            
+        except DataFetchError as e:
+            utils.logger.error(f"[DouYinCrawler.search_and_follow_user] Error: {e}")
+            return
+
+    async def follow_user_by_sec_uid(self, sec_uid: str) -> None:
+        """
+        直接通过sec_uid获取用户信息并关注
+        :param sec_uid: 用户的sec_uid
+        """
+        utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Begin get user info for sec_uid: {sec_uid}")
+        try:
+            # 先访问用户主页
+            user_url = f"https://www.douyin.com/user/{sec_uid}"
+            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Visiting user profile: {user_url}")
+            await self.context_page.goto(user_url)
+            
+            # 模拟人工浏览操作
+            await asyncio.sleep(random.uniform(3, 5))
+            await self.context_page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+            await self.context_page.mouse.wheel(0, random.randint(300, 500))
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # 获取用户信息
+            user_info = await self.dy_client.get_user_info(sec_uid)
+            if not user_info:
+                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Cannot get user info for sec_uid: {sec_uid}")
+                return
+                
+            if "user" not in user_info:
+                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Invalid user info response: {user_info}")
+                return
+                
+            user = user_info.get("user", {})
+            nickname = user.get("nickname", "")
+            
+            if not nickname:
+                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Cannot get nickname for sec_uid: {sec_uid}")
+                return
+            
+            # 模拟查看用户视频
+            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Browsing user videos: {nickname}")
+            await self.context_page.mouse.wheel(0, random.randint(500, 800))
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # 关注用户
+            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Following user: {nickname}")
+            follow_res = await self.dy_client.follow_user(sec_uid)
+            
+            if not follow_res:
+                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Follow failed, empty response")
+                return
+                
+            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Follow result: {follow_res}")
+            
+            # 操作完成后等待一段时间
+            await asyncio.sleep(random.uniform(3, 5))
+            
+        except DataFetchError as e:
+            utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Error: {e}")
+            if "blocked" in str(e).lower():
+                utils.logger.error("账号已被风控，建议：\n1. 等待一段时间再试\n2. 使用新的账号\n3. 开启代理\n4. 减少请求频率")
+            return
+        except Exception as e:
+            utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Unexpected error: {e}")
+            return

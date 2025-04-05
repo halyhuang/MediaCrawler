@@ -320,3 +320,51 @@ class DOUYINClient(AbstractApiClient):
                 await callback(aweme_list)
             result.extend(aweme_list)
         return result
+
+    async def search_user_by_keyword(
+            self,
+            keyword: str,
+            offset: int = 0,
+            search_id: str = ""
+    ):
+        """
+        搜索抖音用户
+        :param keyword: 搜索关键词
+        :param offset: 偏移量
+        :param search_id: 搜索ID
+        :return: 搜索结果
+        """
+        query_params = {
+            'search_channel': SearchChannelType.USER.value,
+            'keyword': keyword,
+            'search_source': 'tab_search',
+            'query_correct_type': '1',
+            'is_filter_search': '0',
+            'offset': offset,
+            'count': '15',
+            'publish_time': 0,
+            'sort_type': 0,
+            'enter_from': 'search_result',
+            'search_id': search_id
+        }
+        referer_url = f"https://www.douyin.com/search/{keyword}?aid=f594bbd9-a0e2-4651-9319-ebe3cb6298c1&type=user"
+        headers = copy.copy(self.headers)
+        headers["Referer"] = urllib.parse.quote(referer_url, safe=':/')
+        return await self.get("/aweme/v1/web/discover/search/", query_params, headers=headers)
+
+    async def follow_user(self, sec_user_id: str):
+        """
+        关注用户
+        :param sec_user_id: 用户ID
+        :return: 关注结果
+        """
+        uri = "/aweme/v1/web/commit/follow/user/"
+        data = {
+            "sec_user_id": sec_user_id,
+            "from": "0",
+            "from_pre": "-1",
+            "enter_from": "search_result"
+        }
+        headers = copy.copy(self.headers)
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        return await self.post(uri, data, headers=headers)

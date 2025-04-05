@@ -11,10 +11,13 @@
 
 import asyncio
 import sys
+import argparse
+import traceback
 
 import cmd_arg
 import config
 import db
+from tools import utils
 from base.base_crawler import AbstractCrawler
 from media_platform.bilibili import BilibiliCrawler
 from media_platform.douyin import DouYinCrawler
@@ -23,6 +26,7 @@ from media_platform.tieba import TieBaCrawler
 from media_platform.weibo import WeiboCrawler
 from media_platform.xhs import XiaoHongShuCrawler
 from media_platform.zhihu import ZhihuCrawler
+from store.douyin.douyin_store_sql import media_crawler_db_var
 
 
 class CrawlerFactory:
@@ -44,21 +48,74 @@ class CrawlerFactory:
         return crawler_class()
 
 
-async def main():
-    # parse cmd
-    await cmd_arg.parse_cmd()
-
-    # init db
-    if config.SAVE_DATA_OPTION == "db":
+async def init_db():
+    """初始化数据库连接"""
+    try:
         await db.init_db()
+        utils.logger.info("Database connection initialized successfully")
+    except Exception as e:
+        utils.logger.error(f"Failed to initialize database connection: {e}")
+        raise
 
-    crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
-    await crawler.start()
 
-    if config.SAVE_DATA_OPTION == "db":
-        await db.close()
+def parse_args():
+    parser = argparse.ArgumentParser(description="A crawler for media platforms")
+    parser.add_argument("--platform", type=str, required=True, help="Platform to crawl (xhs/dy/ks/bili/weibo/tieba/zhihu)")
+    parser.add_argument("--lt", type=str, required=True, help="Login type (qrcode/phone/cookie)")
+    parser.add_argument("--type", type=str, required=True, help="Crawler type (search/detail/creator/follow)")
+    parser.add_argument("--user", type=str, help="User keyword to search and follow (only for follow type)")
+    parser.add_argument("--sec-uid", type=str, help="User sec_uid to directly follow (only for follow type)")
+    return parser.parse_args()
 
-    
+
+async def main():
+    args = parse_args()
+    config.PLATFORM = args.platform
+    config.LOGIN_TYPE = args.lt
+    config.CRAWLER_TYPE = args.type
+
+    # 初始化数据库连接
+    await init_db()
+
+    if args.type == "follow" and not (args.user or args.sec_uid):
+        print("Error: either --user or --sec-uid parameter is required for follow type")
+        return
+
+    crawler = None
+    try:
+        if config.PLATFORM == "xhs":
+            crawler = XiaoHongShuCrawler()
+        elif config.PLATFORM == "dy":
+            crawler = DouYinCrawler()
+        elif config.PLATFORM == "ks":
+            crawler = KuaishouCrawler()
+        elif config.PLATFORM == "bili":
+            crawler = BilibiliCrawler()
+        elif config.PLATFORM == "weibo":
+            crawler = WeiboCrawler()
+        elif config.PLATFORM == "tieba":
+            crawler = TieBaCrawler()
+        elif config.PLATFORM == "zhihu":
+            crawler = ZhihuCrawler()
+        else:
+            print("Error: Invalid platform")
+            return
+
+        await crawler.start()
+        
+        if args.type == "follow" and isinstance(crawler, DouYinCrawler):
+            if args.sec_uid:
+                await crawler.follow_user_by_sec_uid(args.sec_uid)
+            else:
+                await crawler.search_and_follow_user(args.user)
+            
+    except Exception as e:
+        utils.logger.error(f"Crawler error: {e}")
+        traceback.print_exc()
+    finally:
+        if crawler:
+            await crawler.close()
+
 
 if __name__ == '__main__':
     try:
