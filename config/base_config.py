@@ -204,3 +204,26 @@ END_DAY = '2024-01-01'
 # 若为 False，则忽略 START_DAY 与 END_DAY 设置的值
 # 若为 True，则按照 START_DAY 至 END_DAY 按照每一天进行筛选，这样能够突破 1000 条视频的限制，最大程度爬取该关键词下的所有视频
 ALL_DAY = False
+
+# 关注功能相关配置
+# 关注操作前的随机延迟范围(秒)
+FOLLOW_DELAY_MIN = 2
+FOLLOW_DELAY_MAX = 5
+
+# 关注操作失败后的重试次数
+FOLLOW_MAX_RETRIES = 3
+
+# 关注操作失败后的重试延迟(秒)
+FOLLOW_RETRY_DELAY = 10
+
+# 是否在关注前先搜索用户
+FOLLOW_WITH_SEARCH = True
+
+# 是否在关注前模拟浏览用户主页
+FOLLOW_WITH_PROFILE_VISIT = True
+
+# 是否在关注前模拟鼠标移动
+FOLLOW_WITH_MOUSE_MOVE = True
+
+# 关注操作的超时时间(秒)
+FOLLOW_TIMEOUT = 30

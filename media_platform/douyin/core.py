@@ -326,64 +326,176 @@ class DouYinCrawler(AbstractCrawler):
             utils.logger.error(f"[DouYinCrawler.search_and_follow_user] Error: {e}")
             return
 
-    async def follow_user_by_sec_uid(self, sec_uid: str) -> None:
+    async def follow_user_by_sec_uid(self, sec_uid: str) -> bool:
         """
-        直接通过sec_uid获取用户信息并关注
+        通过sec_uid关注用户
         :param sec_uid: 用户的sec_uid
+        :return: 是否关注成功
         """
-        utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Begin get user info for sec_uid: {sec_uid}")
         try:
-            # 先访问用户主页
-            user_url = f"https://www.douyin.com/user/{sec_uid}"
-            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Visiting user profile: {user_url}")
-            await self.context_page.goto(user_url)
-            
-            # 模拟人工浏览操作
-            await asyncio.sleep(random.uniform(3, 5))
-            await self.context_page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-            await self.context_page.mouse.wheel(0, random.randint(300, 500))
-            await asyncio.sleep(random.uniform(2, 4))
-            
             # 获取用户信息
             user_info = await self.dy_client.get_user_info(sec_uid)
             if not user_info:
-                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Cannot get user info for sec_uid: {sec_uid}")
+                utils.logger.error(f"获取用户信息失败: {sec_uid}")
+                return False
+                
+            # 从user_info中正确提取用户信息
+            user = user_info.get("user", {})
+            if not user:
+                utils.logger.error(f"用户信息结构异常: {user_info}")
+                return False
+                
+            nickname = user.get("nickname")
+            if not nickname:
+                utils.logger.error(f"用户昵称为空: {sec_uid}")
+                return False
+                
+            # 如果配置了先搜索用户
+            if config.FOLLOW_WITH_SEARCH:
+                utils.logger.info(f"开始搜索用户: {nickname}")
+                search_result = await self.dy_client.search_user_by_keyword(keyword=nickname)
+                
+                if not search_result:
+                    utils.logger.error(f"搜索用户失败: 返回结果为空")
+                    return False
+                    
+                if "user_list" not in search_result:
+                    utils.logger.error(f"搜索用户失败: 返回结果中没有user_list字段: {search_result}")
+                    return False
+                    
+                user_list = search_result.get("user_list", [])
+                if not user_list:
+                    utils.logger.error(f"搜索用户失败: user_list为空")
+                    return False
+                    
+                # 在搜索结果中查找目标用户
+                target_user = None
+                for user_item in user_list:
+                    user_info = user_item.get("user_info", {})
+                    if user_info.get("sec_uid") == sec_uid:
+                        target_user = user_item
+                        break
+                        
+                if not target_user:
+                    utils.logger.error(f"未在搜索结果中找到目标用户: {nickname}")
+                    # 记录搜索结果中的所有用户信息，方便调试
+                    for user_item in user_list:
+                        user_info = user_item.get("user_info", {})
+                        utils.logger.info(f"搜索结果中的用户: {user_info.get('nickname')} - {user_info.get('sec_uid')}")
+                    return False
+                    
+                utils.logger.info(f"成功找到目标用户: {nickname}")
+                
+            # 如果配置了访问用户主页
+            if config.FOLLOW_WITH_PROFILE_VISIT:
+                profile_url = f"https://www.douyin.com/user/{sec_uid}"
+                utils.logger.info(f"访问用户主页: {profile_url}")
+                
+                # 随机延迟
+                delay = random.uniform(config.FOLLOW_DELAY_MIN, config.FOLLOW_DELAY_MAX)
+                await asyncio.sleep(delay)
+                
+                # 访问主页
+                await self.context_page.goto(profile_url)
+                
+                # 如果配置了模拟鼠标移动
+                if config.FOLLOW_WITH_MOUSE_MOVE:
+                    # 随机移动鼠标
+                    await self.context_page.mouse.move(
+                        random.randint(100, 500),
+                        random.randint(100, 500)
+                    )
+                    
+            # 执行关注操作
+            retry_count = 0
+            while retry_count < config.FOLLOW_MAX_RETRIES:
+                try:
+                    utils.logger.info(f"开始关注用户: {nickname}")
+                    result = await self.dy_client.follow_user(sec_uid)
+                    
+                    if result and result.get("status_code") == 0:
+                        utils.logger.info(f"关注用户成功: {nickname}")
+                        return True
+                    else:
+                        error_msg = result.get("status_msg", "未知错误")
+                        utils.logger.error(f"关注用户失败: {nickname}, 错误: {error_msg}")
+                        
+                        # 如果是账号被限制，直接返回
+                        if "账号被限制" in error_msg:
+                            return False
+                            
+                        retry_count += 1
+                        if retry_count < config.FOLLOW_MAX_RETRIES:
+                            utils.logger.info(f"将在{config.FOLLOW_RETRY_DELAY}秒后重试关注操作")
+                            await asyncio.sleep(config.FOLLOW_RETRY_DELAY)
+                            
+                except Exception as e:
+                    utils.logger.error(f"关注用户时发生异常: {str(e)}")
+                    retry_count += 1
+                    if retry_count < config.FOLLOW_MAX_RETRIES:
+                        await asyncio.sleep(config.FOLLOW_RETRY_DELAY)
+                        
+            return False
+            
+        except Exception as e:
+            utils.logger.error(f"关注用户过程中发生异常: {str(e)}")
+            return False
+
+    async def test_search_user_by_sec_uid(self, sec_uid: str) -> None:
+        """
+        测试通过sec_uid搜索用户
+        :param sec_uid: 用户的sec_uid
+        """
+        utils.logger.info(f"[DouYinCrawler.test_search_user_by_sec_uid] Begin test search user for sec_uid: {sec_uid}")
+        try:
+            # 先获取用户信息
+            user_info = await self.dy_client.get_user_info(sec_uid)
+            if not user_info:
+                utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Cannot get user info for sec_uid: {sec_uid}")
                 return
                 
             if "user" not in user_info:
-                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Invalid user info response: {user_info}")
+                utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Invalid user info response: {user_info}")
                 return
                 
             user = user_info.get("user", {})
             nickname = user.get("nickname", "")
             
             if not nickname:
-                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Cannot get nickname for sec_uid: {sec_uid}")
+                utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Cannot get nickname for sec_uid: {sec_uid}")
                 return
             
-            # 模拟查看用户视频
-            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Browsing user videos: {nickname}")
-            await self.context_page.mouse.wheel(0, random.randint(500, 800))
-            await asyncio.sleep(random.uniform(2, 4))
+            # 通过昵称搜索用户
+            utils.logger.info(f"[DouYinCrawler.test_search_user_by_sec_uid] Searching user by nickname: {nickname}")
+            search_res = await self.dy_client.search_user_by_keyword(keyword=nickname)
             
-            # 关注用户
-            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Following user: {nickname}")
-            follow_res = await self.dy_client.follow_user(sec_uid)
-            
-            if not follow_res:
-                utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Follow failed, empty response")
+            if "user_list" not in search_res:
+                utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Search failed, response: {search_res}")
                 return
                 
-            utils.logger.info(f"[DouYinCrawler.follow_user_by_sec_uid] Follow result: {follow_res}")
+            user_list = search_res.get("user_list", [])
+            if not user_list:
+                utils.logger.info(f"[DouYinCrawler.test_search_user_by_sec_uid] No user found for nickname: {nickname}")
+                return
             
-            # 操作完成后等待一段时间
-            await asyncio.sleep(random.uniform(3, 5))
+            # 验证搜索结果中是否包含目标用户
+            target_user_found = False
+            for user_item in user_list:
+                user_info = user_item.get("user_info", {})
+                if user_info.get("sec_uid") == sec_uid:
+                    target_user_found = True
+                    utils.logger.info(f"[DouYinCrawler.test_search_user_by_sec_uid] Found target user in search results: {nickname}")
+                    break
+            
+            if not target_user_found:
+                utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Target user not found in search results: {nickname}")
+                return
+                
+            utils.logger.info(f"[DouYinCrawler.test_search_user_by_sec_uid] Test completed successfully")
             
         except DataFetchError as e:
-            utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Error: {e}")
-            if "blocked" in str(e).lower():
-                utils.logger.error("账号已被风控，建议：\n1. 等待一段时间再试\n2. 使用新的账号\n3. 开启代理\n4. 减少请求频率")
+            utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Error: {e}")
             return
         except Exception as e:
-            utils.logger.error(f"[DouYinCrawler.follow_user_by_sec_uid] Unexpected error: {e}")
+            utils.logger.error(f"[DouYinCrawler.test_search_user_by_sec_uid] Unexpected error: {e}")
             return

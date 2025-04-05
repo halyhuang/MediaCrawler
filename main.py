@@ -62,9 +62,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="A crawler for media platforms")
     parser.add_argument("--platform", type=str, required=True, help="Platform to crawl (xhs/dy/ks/bili/weibo/tieba/zhihu)")
     parser.add_argument("--lt", type=str, required=True, help="Login type (qrcode/phone/cookie)")
-    parser.add_argument("--type", type=str, required=True, help="Crawler type (search/detail/creator/follow)")
+    parser.add_argument("--type", type=str, required=True, help="Crawler type (search/detail/creator/follow/test)")
     parser.add_argument("--user", type=str, help="User keyword to search and follow (only for follow type)")
-    parser.add_argument("--sec-uid", type=str, help="User sec_uid to directly follow (only for follow type)")
+    parser.add_argument("--sec-uid", type=str, help="User sec_uid to directly follow or test (only for follow/test type)")
     return parser.parse_args()
 
 
@@ -79,6 +79,10 @@ async def main():
 
     if args.type == "follow" and not (args.user or args.sec_uid):
         print("Error: either --user or --sec-uid parameter is required for follow type")
+        return
+        
+    if args.type == "test" and not args.sec_uid:
+        print("Error: --sec-uid parameter is required for test type")
         return
 
     crawler = None
@@ -108,6 +112,8 @@ async def main():
                 await crawler.follow_user_by_sec_uid(args.sec_uid)
             else:
                 await crawler.search_and_follow_user(args.user)
+        elif args.type == "test" and isinstance(crawler, DouYinCrawler):
+            await crawler.test_search_user_by_sec_uid(args.sec_uid)
             
     except Exception as e:
         utils.logger.error(f"Crawler error: {e}")
