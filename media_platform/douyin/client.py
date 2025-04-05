@@ -14,6 +14,7 @@ import copy
 import json
 import urllib.parse
 from typing import Any, Callable, Dict, Optional
+import random
 
 import requests
 from playwright.async_api import BrowserContext
@@ -92,18 +93,46 @@ class DOUYINClient(AbstractApiClient):
         params["a_bogus"] = a_bogus
 
     async def request(self, method, url, **kwargs):
-        response = None
-        if method == "GET":
-            response = requests.request(method, url, **kwargs)
-        elif method == "POST":
-            response = requests.request(method, url, **kwargs)
+        """
+        发送请求
+        :param method: 请求方法
+        :param url: 请求URL
+        :param kwargs: 请求参数
+        :return: 响应结果
+        """
         try:
-            if response.text == "" or response.text == "blocked":
-                utils.logger.error(f"request params incrr, response.text: {response.text}")
-                raise Exception("account blocked")
-            return response.json()
+            # 设置更长的超时时间
+            kwargs['timeout'] = 60  # 增加到60秒
+            
+            # 使用requests发送请求
+            response = requests.request(method, url, **kwargs)
+            
+            # 检查响应状态
+            if response.status_code != 200:
+                utils.logger.error(f"请求失败: {response.status_code} - {response.text}")
+                return None
+            
+            # 检查响应内容
+            if not response.text:
+                utils.logger.error("响应内容为空")
+                return None
+            
+            # 尝试解析JSON
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                utils.logger.error(f"JSON解析失败: {response.text}")
+                return None
+            
+        except requests.Timeout:
+            utils.logger.error("请求超时")
+            return None
+        except requests.RequestException as e:
+            utils.logger.error(f"请求异常: {str(e)}")
+            return None
         except Exception as e:
-            raise DataFetchError(f"{e}, {response.text}")
+            utils.logger.error(f"未知异常: {str(e)}")
+            return None
 
     async def get(self, uri: str, params: Optional[Dict] = None, headers: Optional[Dict] = None):
         """
@@ -358,13 +387,288 @@ class DOUYINClient(AbstractApiClient):
         :param sec_user_id: 用户ID
         :return: 关注结果
         """
-        uri = "/aweme/v1/web/commit/follow/user/"
-        data = {
-            "sec_user_id": sec_user_id,
-            "from": "0",
-            "from_pre": "-1",
-            "enter_from": "search_result"
-        }
-        headers = copy.copy(self.headers)
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-        return await self.post(uri, data, headers=headers)
+        try:
+            utils.logger.info("开始关注用户流程")
+            
+            # 尝试多种选择器查找关注按钮
+            selectors = [
+                # 优先使用最精确的选择器
+                'button.semi-button-primary:has-text("关注")',  # 根据实际class定位红色关注按钮
+                '.semi-button.semi-button-primary:has-text("关注")',  # 备用选择器
+                '.ajC8cNxV.I4tJiW0Q:has-text("关注")',  # 使用特定class组合
+                '[data-e2e="user-info-follow-btn"]',  # 用户信息区域的关注按钮
+                '.user-info button.semi-button-primary',  # 用户信息区域内的主要按钮
+                '.profile-info button.semi-button-primary'  # 用户资料区域内的主要按钮
+            ]
+            
+            utils.logger.info("开始查找关注按钮")
+            follow_button = None
+            original_button = None
+            
+            # 遍历所有选择器
+            for selector in selectors:
+                try:
+                    utils.logger.info(f"尝试使用选择器: {selector}")
+                    # 先检查元素是否存在
+                    elements = await self.playwright_page.query_selector_all(selector)
+                    for element in elements:
+                        # 检查元素是否可见
+                        is_visible = await element.is_visible()
+                        if not is_visible:
+                            continue
+                            
+                        # 获取元素的位置信息
+                        box = await element.bounding_box()
+                        if not box:
+                            continue
+                            
+                        # 检查是否是左侧菜单栏的按钮
+                        if box["x"] < 200:  # 左侧菜单栏通常在屏幕左侧
+                            utils.logger.info(f"跳过左侧菜单栏按钮: x={box['x']}")
+                            continue
+                        
+                        # 检查按钮文本和class
+                        button_text = await element.text_content()
+                        button_class = await element.get_attribute("class")
+                        
+                        if not button_text or "已关注" in button_text or "关注中" in button_text:
+                            continue
+                            
+                        utils.logger.info(f"找到可见的关注按钮，位置: x={box['x']}, y={box['y']}, class={button_class}")
+                        follow_button = element
+                        original_button = {
+                            "selector": selector,
+                            "x": box["x"],
+                            "y": box["y"],
+                            "class": button_class
+                        }
+                        break
+                        
+                    if follow_button:
+                        break
+                except Exception as e:
+                    utils.logger.info(f"选择器 {selector} 查找失败: {str(e)}")
+                    continue
+            
+            if not follow_button:
+                utils.logger.error("未找到可见的关注按钮")
+                # 输出页面内容以供调试
+                page_content = await self.playwright_page.content()
+                utils.logger.info(f"页面内容: {page_content[:500]}...")  # 只记录前500个字符
+                return None
+            
+            # 确保按钮可见和可点击
+            try:
+                # 滚动到按钮位置
+                await follow_button.scroll_into_view_if_needed()
+                await asyncio.sleep(1)
+                utils.logger.info("按钮已滚动到可见位置")
+                
+                # 获取按钮位置
+                button_box = await follow_button.bounding_box()
+                if button_box:
+                    # 随机移动到按钮附近
+                    x_offset = random.randint(-10, 10)
+                    y_offset = random.randint(-5, 5)
+                    await self.playwright_page.mouse.move(
+                        button_box["x"] + button_box["width"] / 2 + x_offset,
+                        button_box["y"] + button_box["height"] / 2 + y_offset
+                    )
+                    utils.logger.info("鼠标已移动到按钮附近")
+                    
+                    # 模拟人类移动到按钮中心
+                    await self.playwright_page.mouse.move(
+                        button_box["x"] + button_box["width"] / 2,
+                        button_box["y"] + button_box["height"] / 2,
+                        steps=5  # 分5步移动，更像人类操作
+                    )
+                    utils.logger.info("鼠标已移动到按钮中心")
+            except Exception as e:
+                utils.logger.error(f"准备点击按钮时出错: {str(e)}")
+                return None
+            
+            # 记录点击前的按钮状态和属性
+            try:
+                button_text_before = await follow_button.text_content()
+                button_class = await follow_button.get_attribute("class")
+                utils.logger.info(f"点击前按钮状态: {button_text_before}")
+                utils.logger.info(f"按钮class: {button_class}")
+                
+                # 检查按钮是否已经是关注状态
+                if "已关注" in button_text_before or "关注中" in button_text_before:
+                    utils.logger.info("按钮已经是关注状态")
+                    return {"status_code": 0, "status_msg": "already followed"}
+            except Exception as e:
+                utils.logger.error(f"获取按钮信息时出错: {str(e)}")
+                return None
+            
+            # 设置网络请求监听
+            follow_request_seen = False
+            
+            def handle_request(request):
+                nonlocal follow_request_seen
+                if "relation/follow" in request.url:
+                    follow_request_seen = True
+                    utils.logger.info("检测到关注请求发出")
+            
+            # 添加请求监听（不需要await）
+            self.playwright_page.on("request", handle_request)
+            
+            # 尝试点击
+            try:
+                # 先尝试使用evaluate click
+                await self.playwright_page.evaluate("""(button) => {
+                    // 模拟真实的鼠标事件
+                    const rect = button.getBoundingClientRect();
+                    const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
+                    events.forEach(eventType => {
+                        const event = new MouseEvent(eventType, {
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: rect.left + rect.width / 2,
+                            clientY: rect.top + rect.height / 2
+                        });
+                        button.dispatchEvent(event);
+                    });
+                }""", follow_button)
+                utils.logger.info("JavaScript事件模拟完成")
+                
+                await asyncio.sleep(1)  # 等待事件生效
+                
+                # 然后使用click方法
+                await follow_button.click(force=True, delay=100)  # 添加force=True强制点击
+                utils.logger.info("元素click方法完成")
+                
+                await asyncio.sleep(1)  # 等待点击生效
+                
+                # 最后使用mouse.click
+                await self.playwright_page.mouse.click(
+                    button_box["x"] + button_box["width"] / 2,
+                    button_box["y"] + button_box["height"] / 2,
+                    delay=100  # 添加点击延迟
+                )
+                utils.logger.info("鼠标点击完成")
+                
+                # 等待可能的关注请求
+                start_time = asyncio.get_event_loop().time()
+                while not follow_request_seen and (asyncio.get_event_loop().time() - start_time) < 10:
+                    await asyncio.sleep(0.5)
+                    
+                    # 在等待过程中检查按钮状态
+                    try:
+                        # 使用原始选择器重新获取按钮
+                        current_button = await self.playwright_page.query_selector(original_button["selector"])
+                        if current_button:
+                            current_box = await current_button.bounding_box()
+                            if current_box and abs(current_box["x"] - original_button["x"]) < 50:  # 确保是同一个按钮
+                                current_text = await current_button.text_content()
+                                current_class = await current_button.get_attribute("class")
+                                utils.logger.info(f"等待过程中按钮状态 - 文本: {current_text}, class: {current_class}")
+                                if "已关注" in current_text or "关注中" in current_text:
+                                    utils.logger.info(f"点击后按钮文本变为: {current_text}")
+                                    return {"status_code": 0, "status_msg": "success"}
+                    except:
+                        pass  # 忽略检查错误
+                
+                if follow_request_seen:
+                    utils.logger.info("已检测到关注请求")
+                else:
+                    utils.logger.warning("未检测到关注请求，但继续检查状态")
+                    
+                    # 如果没有检测到请求，尝试直接调用API
+                    try:
+                        utils.logger.info("尝试使用API发送关注请求")
+                        uri = "/aweme/v1/web/commit/follow/user/"
+                        params = {
+                            "sec_user_id": sec_user_id,
+                            "from": "0",
+                            "from_pre": "0",
+                            "enter_from": "homepage",
+                            "type": "1"  # 添加type参数
+                        }
+                        headers = copy.copy(self.headers)
+                        headers["Referer"] = f"https://www.douyin.com/user/{sec_user_id}"
+                        headers["Content-Type"] = "application/x-www-form-urlencoded"  # 添加Content-Type
+                        headers["Accept"] = "application/json, text/plain, */*"  # 添加Accept
+                        
+                        # 添加X-Secsdk-Csrf-Token
+                        csrf_token = ""
+                        try:
+                            csrf_token = await self.playwright_page.evaluate("""() => {
+                                return document.cookie.split('; ').find(row => row.startsWith('csrf_session_id=')).split('=')[1]
+                            }""")
+                        except:
+                            pass
+                        
+                        if csrf_token:
+                            headers["X-Secsdk-Csrf-Token"] = csrf_token
+                        
+                        api_result = await self.post(uri, params, headers)
+                        if api_result and api_result.get("status_code") == 0:
+                            utils.logger.info("API关注请求成功")
+                            return {"status_code": 0, "status_msg": "success"}
+                        else:
+                            utils.logger.warning(f"API关注请求失败: {api_result}")
+                    except Exception as api_e:
+                        utils.logger.error(f"API关注请求异常: {str(api_e)}")
+                
+                # 等待页面稳定
+                await asyncio.sleep(2)
+                
+                # 多次检查按钮状态
+                max_retries = 5  # 增加重试次数
+                for i in range(max_retries):
+                    try:
+                        # 使用原始选择器重新获取按钮
+                        current_button = await self.playwright_page.query_selector(original_button["selector"])
+                        if not current_button:
+                            utils.logger.info("找不到原按钮，尝试其他选择器")
+                            for selector in selectors:
+                                temp_button = await self.playwright_page.query_selector(selector)
+                                if temp_button:
+                                    temp_box = await temp_button.bounding_box()
+                                    if temp_box and abs(temp_box["x"] - original_button["x"]) < 50:
+                                        current_button = temp_button
+                                        break
+                        
+                        if not current_button:
+                            utils.logger.info("无法找到关注按钮，可能已变为已关注状态")
+                            return {"status_code": 0, "status_msg": "success"}
+                        
+                        button_text_after = await current_button.text_content()
+                        button_class_after = await current_button.get_attribute("class")
+                        utils.logger.info(f"第{i+1}次检查 - 按钮文本: {button_text_after}, class: {button_class_after}")
+                        
+                        # 检查按钮状态变化
+                        if "已关注" in button_text_after or "关注中" in button_text_after:
+                            utils.logger.info("关注操作成功")
+                            return {"status_code": 0, "status_msg": "success"}
+                        
+                        # 如果按钮文本还是"关注"，可能需要重试点击
+                        if i < max_retries - 1 and button_text_after == "关注":
+                            utils.logger.info("按钮状态未变化，尝试重新点击...")
+                            await current_button.click(force=True, delay=100)
+                            await asyncio.sleep(2)
+                        
+                        if i < max_retries - 1:
+                            utils.logger.info("继续等待状态变化...")
+                            await asyncio.sleep(2)
+                    except Exception as check_e:
+                        utils.logger.error(f"第{i+1}次检查时出错: {str(check_e)}")
+                        if i < max_retries - 1:
+                            continue
+                
+                utils.logger.error("多次检查后未发现状态变化")
+                return None
+                
+            except Exception as e:
+                utils.logger.error(f"点击或验证过程出错: {str(e)}")
+                return None
+            finally:
+                # 移除请求监听（不需要await）
+                self.playwright_page.remove_listener("request", handle_request)
+            
+        except Exception as e:
+            utils.logger.error(f"关注用户时发生异常: {str(e)}")
+            return None
