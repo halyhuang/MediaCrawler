@@ -15,6 +15,7 @@ import json
 import urllib.parse
 from typing import Any, Callable, Dict, Optional
 import random
+import time
 
 import requests
 from playwright.async_api import BrowserContext
@@ -390,6 +391,39 @@ class DOUYINClient(AbstractApiClient):
         try:
             utils.logger.info("开始关注用户流程")
             
+            # 先检查用户是否已关注
+            utils.logger.info("检查用户是否已关注")
+            follow_status_selectors = [
+                'button:has-text("已关注")',
+                '.semi-button:has-text("已关注")',
+                '.semi-button-tertiary:has-text("已关注")',
+                '[data-e2e="user-info-follow-btn"]:has-text("已关注")'
+            ]
+            
+            # 等待页面加载完成，使用更短的超时时间
+            try:
+                await self.playwright_page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception as e:
+                utils.logger.info(f"等待页面加载完成超时，继续执行: {str(e)}")
+            
+            await asyncio.sleep(1)  # 短暂等待
+            
+            # 检查是否已关注，使用更短的超时时间
+            for selector in follow_status_selectors:
+                try:
+                    follow_status = await self.playwright_page.wait_for_selector(
+                        selector,
+                        state="visible",
+                        timeout=2000  # 每个选择器最多等待2秒
+                    )
+                    if follow_status:
+                        utils.logger.info("检测到已关注状态")
+                        return {"status_code": 0, "status_msg": "already followed"}
+                except Exception:
+                    continue
+            
+            utils.logger.info("用户未关注，开始执行关注操作")
+            
             # 尝试多种选择器查找关注按钮
             selectors = [
                 # 优先使用最精确的选择器
@@ -398,7 +432,8 @@ class DOUYINClient(AbstractApiClient):
                 '.ajC8cNxV.I4tJiW0Q:has-text("关注")',  # 使用特定class组合
                 '[data-e2e="user-info-follow-btn"]',  # 用户信息区域的关注按钮
                 '.user-info button.semi-button-primary',  # 用户信息区域内的主要按钮
-                '.profile-info button.semi-button-primary'  # 用户资料区域内的主要按钮
+                '.profile-info button.semi-button-primary',  # 用户资料区域内的主要按钮
+                '.semi-button.semi-button-primary[data-e2e="user-info-follow-btn"]'  # 组合选择器
             ]
             
             utils.logger.info("开始查找关注按钮")
@@ -676,3 +711,171 @@ class DOUYINClient(AbstractApiClient):
         except Exception as e:
             utils.logger.error(f"关注用户时发生异常: {str(e)}")
             return None
+
+    async def send_private_message(self, sec_user_id: str, message: str = "你好"):
+        """
+        发送私聊消息
+        :param sec_user_id: 用户ID
+        :param message: 要发送的消息
+        :return: 发送结果
+        """
+        try:
+            utils.logger.info("开始发送私聊消息流程")
+            
+            # 刷新页面以确保状态正确
+            try:
+                await self.playwright_page.reload(timeout=5000)
+                await asyncio.sleep(1)
+            except Exception as e:
+                utils.logger.warning(f"页面刷新超时，继续执行: {str(e)}")
+            
+            # 设置视窗大小以确保能看到右侧按钮
+            await self.playwright_page.set_viewport_size({"width": 2560, "height": 1440})
+            
+            # 尝试查找私信按钮
+            selectors = [
+                'button:has-text("私信")',
+                '[data-e2e="user-info-message-btn"]',
+                '.semi-button:has-text("私信")',
+                '.message-btn',
+                '.semi-button.semi-button-tertiary:has-text("私信")',
+                '.semi-button-tertiary:has-text("私信")',
+                '.semi-button.semi-button-tertiary',
+                '[data-e2e="user-info-message"]'
+            ]
+            
+            utils.logger.info("开始查找私信按钮")
+            message_button = None
+            
+            # 确保页面加载完成
+            try:
+                await self.playwright_page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception as e:
+                utils.logger.warning(f"等待页面加载完成超时，继续执行: {str(e)}")
+            
+            # 滚动到页面顶部
+            await self.playwright_page.evaluate("window.scrollTo(0, 0)")
+            await asyncio.sleep(1)
+            
+            # 遍历所有选择器尝试查找按钮
+            for selector in selectors:
+                try:
+                    elements = await self.playwright_page.query_selector_all(selector)
+                    utils.logger.info(f"选择器 {selector} 找到 {len(elements)} 个元素")
+                    
+                    for element in elements:
+                        if not await element.is_visible():
+                            continue
+                            
+                        box = await element.bounding_box()
+                        if not box:
+                            continue
+                        
+                        button_text = await element.text_content()
+                        if not button_text or "私信" not in button_text:
+                            continue
+                            
+                        utils.logger.info(f"找到可见的私信按钮，位置: x={box['x']}, y={box['y']}, 文本: {button_text}")
+                        message_button = element
+                        break
+                        
+                    if message_button:
+                        break
+                except Exception as e:
+                    utils.logger.info(f"选择器 {selector} 查找失败: {str(e)}")
+                    continue
+            
+            if not message_button:
+                utils.logger.error("未找到私信按钮")
+                return None
+                
+            # 点击私信按钮
+            try:
+                await message_button.click()
+                utils.logger.info("已点击私信按钮")
+                await asyncio.sleep(2)  # 等待对话框加载
+                
+                try:
+                    # 获取当前活动元素（焦点元素）
+                    active_element = await self.playwright_page.evaluate("""() => {
+                        const active = document.activeElement;
+                        return {
+                            tagName: active.tagName.toLowerCase(),
+                            isContentEditable: active.isContentEditable,
+                            placeholder: active.getAttribute('placeholder'),
+                            className: active.className
+                        };
+                    }""")
+                    
+                    utils.logger.info(f"当前焦点元素信息: {active_element}")
+                    
+                    # 直接在活动元素上输入
+                    await self.playwright_page.keyboard.type(message, delay=50)
+                    utils.logger.info("使用键盘输入消息")
+                    
+                    # 等待一下确保消息输入完成
+                    await asyncio.sleep(0.5)
+                    
+                    # 按回车发送消息
+                    await self.playwright_page.keyboard.press('Enter')
+                    utils.logger.info("按回车发送消息")
+                    
+                    # 等待消息发送
+                    await asyncio.sleep(1)
+                    
+                    return {"status": "success", "message": "私信发送成功"}
+                    
+                except Exception as e:
+                    utils.logger.error(f"使用活动元素输入消息失败: {str(e)}")
+                    return None
+                    
+            except Exception as e:
+                utils.logger.error(f"发送私信过程中出错: {str(e)}")
+                return None
+                
+        except Exception as e:
+            utils.logger.error(f"发送私信时发生异常: {str(e)}")
+            return None
+
+    async def check_follow_status(self, sec_user_id: str):
+        """
+        检查是否已关注用户
+        :param sec_user_id: 用户ID
+        :return: 是否已关注
+        """
+        try:
+            uri = "/aweme/v1/web/user/following/list/"
+            params = {
+                "sec_user_id": sec_user_id,
+                "count": 1,
+                "offset": 0,
+                "min_time": 0,
+                "max_time": int(time.time()),
+                "source_type": 1,
+                "gps_access": 0,
+                "address_book_access": 0
+            }
+            headers = copy.copy(self.headers)
+            headers["Referer"] = f"https://www.douyin.com/user/{sec_user_id}"
+            
+            # 先尝试API检查
+            try:
+                result = await self.get(uri, params, headers)
+                if result and result.get("status_code") == 0:
+                    utils.logger.info("API检查关注状态成功")
+                    return True
+            except Exception as e:
+                utils.logger.info(f"API检查关注状态失败: {str(e)}")
+            
+            # 如果API检查失败，尝试从用户信息中获取关注状态
+            user_info = await self.get_user_info(sec_user_id)
+            if user_info and "user" in user_info:
+                follow_status = user_info["user"].get("follow_status", 0)
+                utils.logger.info(f"从用户信息获取关注状态: {follow_status}")
+                return follow_status == 1  # 1表示已关注
+            
+            return False
+            
+        except Exception as e:
+            utils.logger.error(f"检查关注状态时发生异常: {str(e)}")
+            return False
