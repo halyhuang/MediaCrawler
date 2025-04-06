@@ -28,6 +28,7 @@ from media_platform.xhs import XiaoHongShuCrawler
 from media_platform.zhihu import ZhihuCrawler
 from store.douyin.douyin_store_sql import media_crawler_db_var
 from media_platform.douyin.message_listener import DouYinMessageListener
+from var import crawler_type_var, source_keyword_var
 
 
 class CrawlerFactory:
@@ -66,75 +67,84 @@ def parse_args():
     parser.add_argument("--type", type=str, required=True, help="Crawler type (search/detail/creator/follow/test)")
     parser.add_argument("--user", type=str, help="User keyword to search and follow (only for follow type)")
     parser.add_argument("--sec-uid", type=str, help="User sec_uid to directly follow or test (only for follow/test type)")
+    parser.add_argument("--keyword", type=str, help="Keyword for search (optional)")
     return parser.parse_args()
 
 
 async def main():
-    args = parse_args()
-    config.PLATFORM = args.platform
-    config.LOGIN_TYPE = args.lt
-    config.CRAWLER_TYPE = args.type
-
     # 初始化数据库连接
     await init_db()
+    utils.logger.info("Database connection initialized successfully")
 
-    if args.type == "follow" and not (args.user or args.sec_uid):
-        print("Error: either --user or --sec-uid parameter is required for follow type")
-        return
-        
-    if args.type == "test" and not args.sec_uid:
-        print("Error: --sec-uid parameter is required for test type")
-        return
+    # 解析命令行参数
+    args = parse_args()
+    platform = args.platform
+    login_type = args.lt
+    crawler_type = args.type
 
+    # 设置全局变量
+    crawler_type_var.set(crawler_type)
+    if hasattr(args, 'keyword') and args.keyword:
+        source_keyword_var.set(args.keyword)
+
+    # 创建爬虫实例
     crawler = None
     message_listener = None
     try:
-        if config.PLATFORM == "xhs":
+        if platform == "xhs":
             crawler = XiaoHongShuCrawler()
-        elif config.PLATFORM == "dy":
+        elif platform == "dy":
             crawler = DouYinCrawler()
             # 创建消息监听器
             message_listener = DouYinMessageListener()
-        elif config.PLATFORM == "ks":
+        elif platform == "ks":
             crawler = KuaishouCrawler()
-        elif config.PLATFORM == "bili":
+        elif platform == "bili":
             crawler = BilibiliCrawler()
-        elif config.PLATFORM == "weibo":
+        elif platform == "weibo":
             crawler = WeiboCrawler()
-        elif config.PLATFORM == "tieba":
+        elif platform == "tieba":
             crawler = TieBaCrawler()
-        elif config.PLATFORM == "zhihu":
+        elif platform == "zhihu":
             crawler = ZhihuCrawler()
         else:
-            print("Error: Invalid platform")
+            utils.logger.error(f"Unsupported platform: {platform}")
             return
 
+        # 启动爬虫
         await crawler.start()
         
         # 如果是抖音平台，启动消息监听
-        if config.PLATFORM == "dy" and message_listener:
+        if platform == "dy" and message_listener:
             # 创建消息监听任务
             message_task = asyncio.create_task(message_listener.start_listening(crawler.dy_client))
             
-        if args.type == "follow" and isinstance(crawler, DouYinCrawler):
+        if crawler_type == "follow" and isinstance(crawler, DouYinCrawler):
             if args.sec_uid:
                 await crawler.follow_user_by_sec_uid(args.sec_uid)
             else:
                 await crawler.search_and_follow_user(args.user)
-        elif args.type == "test" and isinstance(crawler, DouYinCrawler):
+        elif crawler_type == "test" and isinstance(crawler, DouYinCrawler):
             await crawler.test_search_user_by_sec_uid(args.sec_uid)
             
     except Exception as e:
-        utils.logger.error(f"Crawler error: {e}")
+        utils.logger.error(f"Crawler error: {str(e)}")
         traceback.print_exc()
     finally:
+        # 关闭爬虫
         if crawler:
-            await crawler.close()
+            try:
+                await crawler.close()
+            except Exception as e:
+                utils.logger.error(f"Error closing crawler: {str(e)}")
+                traceback.print_exc()
 
 
 if __name__ == '__main__':
     try:
-        # asyncio.run(main())
-        asyncio.get_event_loop().run_until_complete(main())
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
     except KeyboardInterrupt:
         sys.exit()

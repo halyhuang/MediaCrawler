@@ -65,8 +65,8 @@ def get_random_user_agent():
 
 async def test_proxy():
     # 从环境变量或配置文件中获取快代理参数
-    secret_id = os.getenv("kdl_secret_id", "ol8uttmcvpzmkj4cuv5v")
-    signature = os.getenv("kdl_signature", "jrla2myvgayveubgpe8juycchplh9skz")
+    secret_id = os.getenv("kdl_secret_id", "uisymj7xdri4cffgy5kb")
+    signature = os.getenv("kdl_signature", "sqxamzpr9a5my0eccis74nm9e59xmaaf")
     
     # 使用快代理官方示例中的用户名和密码
     username = "d2846629878"  # 官方示例中的用户名
@@ -81,7 +81,7 @@ async def test_proxy():
     # 如果缓存中没有有效的代理IP，则从API获取
     if not proxy_ip:
         # 构建API请求URL
-        api_url = f"https://dps.kdlapi.com/api/getdps/?secret_id={secret_id}&signature={signature}&num=1&pt=1&sep=1&format=json"
+        api_url = f"https://dps.kdlapi.com/api/getdps/?secret_id=ol8uttmcvpzmkj4cuv5v&signature=jrla2myvgayveubgpe8juycchplh9skz&num=1&pt=1&sep=1&format=json"
         
         try:
             # 获取代理IP
@@ -140,7 +140,7 @@ async def test_proxy():
         "Proxy-Authorization": f"Basic {auth_str}",
         "User-Agent": get_random_user_agent(),
         "Accept": "*/*",
-        "Connection": "keep-alive"
+        "Connection": "close"  # 使用close而不是keep-alive，避免隧道模式
     }
     
     proxies3 = {
@@ -151,81 +151,67 @@ async def test_proxy():
     utils.logger.info("已构建三种代理配置方式")
     
     # 测试代理连接 - 使用requests库
-    utils.logger.info("正在使用requests库测试代理IP信息（方法1）...")
-    try:
-        # 首先测试httpbin.org
-        r = requests.get("http://httpbin.org/ip", proxies=proxies1, timeout=30)
-        if r.status_code == 200:
-            ip_info = r.json()
-            utils.logger.info(f"方法1成功，当前代理IP: {ip_info.get('origin')}")
-        else:
-            utils.logger.error(f"方法1失败，状态码: {r.status_code}")
-            utils.logger.error(f"响应内容: {r.text}")
+    utils.logger.info("正在使用requests库测试代理IP信息...")
+    
+    # 定义三种代理配置方法
+    proxy_methods = [
+        {
+            "name": "方法1（用户名密码认证）",
+            "proxies": proxies1,
+            "headers": {},
+            "timeout": 30
+        },
+        {
+            "name": "方法2（隧道代理）",
+            "proxies": proxies2,
+            "headers": {},
+            "timeout": 60
+        },
+        {
+            "name": "方法3（base64认证头）",
+            "proxies": proxies3,
+            "headers": headers,
+            "timeout": 30
+        }
+    ]
+    
+    # 遍历尝试所有方法
+    success = False
+    for method in proxy_methods:
+        utils.logger.info(f"尝试{method['name']}...")
+        try:
+            r = requests.get("https://httpbin.org/ip", 
+                            proxies=method['proxies'], 
+                            headers=method['headers'], 
+                            timeout=method['timeout'], 
+                            verify=False)
             
-            # 如果是454错误，清除缓存并重新获取代理IP
-            if r.status_code == 454:
-                utils.logger.info("代理IP已失效，清除缓存并重新获取...")
-                clear_cache()
-                return await test_proxy()  # 递归调用，重新获取代理IP
-            
-            # 尝试方法2
-            utils.logger.info("尝试方法2（隧道代理）...")
-            try:
-                # 增加连接超时时间
-                r = requests.get("http://httpbin.org/ip", proxies=proxies2, timeout=60)
-                if r.status_code == 200:
-                    ip_info = r.json()
-                    utils.logger.info(f"方法2成功，当前代理IP: {ip_info.get('origin')}")
-                else:
-                    utils.logger.error(f"方法2失败，状态码: {r.status_code}")
-                    utils.logger.error(f"响应内容: {r.text}")
-                    
-                    # 尝试方法3
-                    utils.logger.info("尝试方法3（base64认证头）...")
-                    r = requests.get("http://httpbin.org/ip", proxies=proxies3, headers=headers, timeout=30)
-                    if r.status_code == 200:
-                        ip_info = r.json()
-                        utils.logger.info(f"方法3成功，当前代理IP: {ip_info.get('origin')}")
-                    else:
-                        utils.logger.error(f"方法3失败，状态码: {r.status_code}")
-                        utils.logger.error(f"响应内容: {r.text}")
-                        
-                        # 所有方法都失败，清除缓存并重新获取代理IP
-                        utils.logger.info("所有方法都失败，清除缓存并重新获取代理IP...")
-                        clear_cache()
-                        return await test_proxy()  # 递归调用，重新获取代理IP
-            except requests.exceptions.RequestException as e:
-                utils.logger.error(f"方法2连接异常: {str(e)}")
+            if r.status_code == 200:
+                ip_info = r.json()
+                utils.logger.info(f"{method['name']}成功，当前代理IP: {ip_info.get('origin')}")
+                success = True
+                break  # 成功则跳出循环
+            else:
+                utils.logger.error(f"{method['name']}失败，状态码: {r.status_code}")
+                utils.logger.error(f"响应内容: {r.text}")
                 
-                # 尝试方法3
-                utils.logger.info("尝试方法3（base64认证头）...")
-                try:
-                    r = requests.get("http://httpbin.org/ip", proxies=proxies3, headers=headers, timeout=30)
-                    if r.status_code == 200:
-                        ip_info = r.json()
-                        utils.logger.info(f"方法3成功，当前代理IP: {ip_info.get('origin')}")
-                    else:
-                        utils.logger.error(f"方法3失败，状态码: {r.status_code}")
-                        utils.logger.error(f"响应内容: {r.text}")
-                        
-                        # 所有方法都失败，清除缓存并重新获取代理IP
-                        utils.logger.info("所有方法都失败，清除缓存并重新获取代理IP...")
-                        clear_cache()
-                        return await test_proxy()  # 递归调用，重新获取代理IP
-                except requests.exceptions.RequestException as e:
-                    utils.logger.error(f"方法3连接异常: {str(e)}")
-                    
-                    # 所有方法都失败，清除缓存并重新获取代理IP
-                    utils.logger.info("所有方法都失败，清除缓存并重新获取代理IP...")
+                # 如果是454错误，清除缓存并重新获取代理IP
+                if r.status_code == 454:
+                    utils.logger.info("代理IP已失效，清除缓存并重新获取...")
                     clear_cache()
                     return await test_proxy()  # 递归调用，重新获取代理IP
-    except Exception as e:
-        utils.logger.error(f"使用requests库测试异常: {str(e)}")
-        
-        # 清除缓存并重新获取代理IP
-        utils.logger.info("测试异常，清除缓存并重新获取代理IP...")
-        clear_cache()
-        return await test_proxy()  # 递归调用，重新获取代理IP
+        except requests.exceptions.ProxyError as e:
+            if "407 Proxy Authentication Required" in str(e):
+                utils.logger.error(f"{method['name']}连接异常: 407 Proxy Authentication Required")
+                utils.logger.info("检测到407错误，尝试其他认证方法...")
+            else:
+                utils.logger.error(f"{method['name']}连接异常: {str(e)}")
+        except Exception as e:
+            utils.logger.error(f"{method['name']}连接异常: {str(e)}")
+    
+    # 如果所有方法都失败，则退出
+    if not success:
+        return 
     
     # 测试代理连接抖音
     utils.logger.info("正在测试代理连接抖音...")
@@ -325,23 +311,7 @@ async def test_proxy():
             utils.logger.error(f"响应内容: {r.text}")
     except Exception as e:
         utils.logger.error(f"代理连接小红书异常: {str(e)}")
-    
-    # 测试使用项目中的快代理提供者
-    utils.logger.info("正在测试项目中的快代理提供者...")
-    try:
-        # 修改快代理提供者的API调用
-        proxy_provider = new_kuai_daili_proxy()
-        # 确保API调用格式正确
-        proxies = await proxy_provider.get_proxies(1)
-        if proxies:
-            proxy = proxies[0]
-            utils.logger.info(f"成功获取到代理: {proxy.ip}:{proxy.port}")
-            utils.logger.info(f"代理过期时间: {proxy.expired_time_ts}")
-        else:
-            utils.logger.error("未能获取到代理")
-    except Exception as e:
-        utils.logger.error(f"测试项目中的快代理提供者失败: {str(e)}")
-                    
+                       
     except Exception as e:
         utils.logger.error(f"代理测试失败: {str(e)}")
         utils.logger.error(f"错误详情: ", exc_info=True)

@@ -469,8 +469,11 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
-        await self.browser_context.close()
-        utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
+        if hasattr(self, 'browser_context') and self.browser_context:
+            await self.browser_context.close()
+            utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
+        else:
+            utils.logger.warning("[XiaoHongShuCrawler.close] Browser context not initialized, skipping close ...")
 
     async def get_notice_media(self, note_detail: Dict):
         if not config.ENABLE_GET_IMAGES:
