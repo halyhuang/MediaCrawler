@@ -13,7 +13,7 @@ import asyncio
 import copy
 import json
 import urllib.parse
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, List
 import random
 import time
 
@@ -879,3 +879,23 @@ class DOUYINClient(AbstractApiClient):
         except Exception as e:
             utils.logger.error(f"检查关注状态时发生异常: {str(e)}")
             return False
+
+    async def get_messages(self) -> List[Dict]:
+        """获取用户收到的消息"""
+        try:
+            # 这里需要实现具体的消息获取API调用
+            # 示例实现，实际需要根据抖音的API进行调整
+            response = await self.session.get(
+                "https://www.douyin.com/aweme/v1/web/im/fetch/",
+                headers=self.headers
+            )
+            data = await response.json()
+            
+            if data.get("status_code") == 0:
+                return data.get("messages", [])
+            else:
+                utils.logger.error(f"Failed to get messages: {data}")
+                return []
+        except Exception as e:
+            utils.logger.error(f"Error getting messages: {e}")
+            return []

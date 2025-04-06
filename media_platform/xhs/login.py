@@ -72,14 +72,27 @@ class XiaoHongShuLogin(AbstractLogin):
     async def login_by_mobile(self):
         """Login xiaohongshu by mobile"""
         utils.logger.info("[XiaoHongShuLogin.login_by_mobile] Begin login xiaohongshu by mobile ...")
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # 适当等待时间
+        
         try:
+            # 等待页面加载完成
+            await self.context_page.wait_for_load_state("domcontentloaded")
+            
+            # 尝试调整窗口大小和位置
+            await self.context_page.evaluate("""() => {
+                window.moveTo(0, 0);
+                window.resizeTo(1280, 800);
+                window.scrollTo(0, 0);
+            }""")
+            
             # 小红书进入首页后，有可能不会自动弹出登录框，需要手动点击登录按钮
             login_button_ele = await self.context_page.wait_for_selector(
                 selector="xpath=//*[@id='app']/div[1]/div[2]/div[1]/ul/div[1]/button",
                 timeout=5000
             )
             await login_button_ele.click()
+            await asyncio.sleep(0.5)  # 适当等待时间
+            
             # 弹窗的登录对话框也有两种形态，一种是直接可以看到手机号和验证码的
             # 另一种是需要点击切换到手机登录的
             element = await self.context_page.wait_for_selector(
@@ -87,17 +100,20 @@ class XiaoHongShuLogin(AbstractLogin):
                 timeout=5000
             )
             await element.click()
+            await asyncio.sleep(0.5)  # 适当等待时间
         except Exception as e:
             utils.logger.info("[XiaoHongShuLogin.login_by_mobile] have not found mobile button icon and keep going ...")
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
         login_container_ele = await self.context_page.wait_for_selector("div.login-container")
         input_ele = await login_container_ele.query_selector("label.phone > input")
         await input_ele.fill(self.login_phone)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # 适当等待时间
 
         send_btn_ele = await login_container_ele.query_selector("label.auth-code > span")
         await send_btn_ele.click()  # 点击发送验证码
+        await asyncio.sleep(0.5)  # 适当等待时间
+        
         sms_code_input_ele = await login_container_ele.query_selector("label.auth-code > input")
         submit_btn_ele = await login_container_ele.query_selector("div.input-container > button")
         cache_client = CacheFactory.create_cache(config.CACHE_TYPE_MEMORY)
@@ -117,12 +133,14 @@ class XiaoHongShuLogin(AbstractLogin):
             no_logged_in_session = cookie_dict.get("web_session")
 
             await sms_code_input_ele.fill(value=sms_code_value.decode())  # 输入短信验证码
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # 适当等待时间
+            
             agree_privacy_ele = self.context_page.locator("xpath=//div[@class='agreements']//*[local-name()='svg']")
             await agree_privacy_ele.click()  # 点击同意隐私协议
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # 适当等待时间
 
             await submit_btn_ele.click()  # 点击登录
+            await asyncio.sleep(0.5)  # 适当等待时间
 
             # todo ... 应该还需要检查验证码的正确性有可能输入的验证码不正确
             break
@@ -140,6 +158,18 @@ class XiaoHongShuLogin(AbstractLogin):
     async def login_by_qrcode(self):
         """login xiaohongshu website and keep webdriver login state"""
         utils.logger.info("[XiaoHongShuLogin.login_by_qrcode] Begin login xiaohongshu by qrcode ...")
+        
+        # 等待页面加载完成
+        await self.context_page.wait_for_load_state("domcontentloaded")
+        await asyncio.sleep(1)  # 适当等待时间
+        
+        # 尝试调整窗口大小和位置
+        await self.context_page.evaluate("""() => {
+            window.moveTo(0, 0);
+            window.resizeTo(1280, 800);
+            window.scrollTo(0, 0);
+        }""")
+        
         # login_selector = "div.login-container > div.left > div.qrcode > img"
         qrcode_img_selector = "xpath=//img[@class='qrcode-img']"
         # find login qrcode
@@ -150,9 +180,16 @@ class XiaoHongShuLogin(AbstractLogin):
         if not base64_qrcode_img:
             utils.logger.info("[XiaoHongShuLogin.login_by_qrcode] login failed , have not found qrcode please check ....")
             # if this website does not automatically popup login dialog box, we will manual click login button
+            await asyncio.sleep(0.5)  # 适当等待时间
+            
+            # 尝试滚动到页面顶部
+            await self.context_page.evaluate("window.scrollTo(0, 0)")
             await asyncio.sleep(0.5)
+            
             login_button_ele = self.context_page.locator("xpath=//*[@id='app']/div[1]/div[2]/div[1]/ul/div[1]/button")
             await login_button_ele.click()
+            await asyncio.sleep(0.5)  # 适当等待时间
+            
             base64_qrcode_img = await utils.find_login_qrcode(
                 self.context_page,
                 selector=qrcode_img_selector

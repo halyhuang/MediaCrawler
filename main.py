@@ -27,6 +27,7 @@ from media_platform.weibo import WeiboCrawler
 from media_platform.xhs import XiaoHongShuCrawler
 from media_platform.zhihu import ZhihuCrawler
 from store.douyin.douyin_store_sql import media_crawler_db_var
+from media_platform.douyin.message_listener import DouYinMessageListener
 
 
 class CrawlerFactory:
@@ -86,11 +87,14 @@ async def main():
         return
 
     crawler = None
+    message_listener = None
     try:
         if config.PLATFORM == "xhs":
             crawler = XiaoHongShuCrawler()
         elif config.PLATFORM == "dy":
             crawler = DouYinCrawler()
+            # 创建消息监听器
+            message_listener = DouYinMessageListener()
         elif config.PLATFORM == "ks":
             crawler = KuaishouCrawler()
         elif config.PLATFORM == "bili":
@@ -107,6 +111,11 @@ async def main():
 
         await crawler.start()
         
+        # 如果是抖音平台，启动消息监听
+        if config.PLATFORM == "dy" and message_listener:
+            # 创建消息监听任务
+            message_task = asyncio.create_task(message_listener.start_listening(crawler.dy_client))
+            
         if args.type == "follow" and isinstance(crawler, DouYinCrawler):
             if args.sec_uid:
                 await crawler.follow_user_by_sec_uid(args.sec_uid)

@@ -103,14 +103,29 @@ class DouYinLogin(AbstractLogin):
         """If the login dialog box does not pop up automatically, we will manually click the login button"""
         dialog_selector = "xpath=//div[@id='login-pannel']"
         try:
+            # 等待页面加载完成
+            await self.context_page.wait_for_load_state("networkidle")
+            await asyncio.sleep(2)  # 额外等待2秒确保页面完全加载
+            
+            # 尝试调整窗口大小
+            await self.context_page.evaluate("""() => {
+                window.moveTo(0, 0);
+                window.resizeTo(2560, 1440);
+            }""")
+            
             # check dialog box is auto popup and wait for 300 seconds
             await self.context_page.wait_for_selector(dialog_selector, timeout=1000 * 300)
         except Exception as e:
             utils.logger.error(f"[DouYinLogin.popup_login_dialog] login dialog box does not pop up automatically, error: {e}")
             utils.logger.info("[DouYinLogin.popup_login_dialog] login dialog box does not pop up automatically, we will manually click the login button")
+            
+            # 尝试滚动到页面顶部
+            await self.context_page.evaluate("window.scrollTo(0, 0)")
+            await asyncio.sleep(1)
+            
             login_button_ele = self.context_page.locator("xpath=//p[text() = '登录']")
             await login_button_ele.click()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)  # 增加点击后的等待时间
 
     async def login_by_qrcode(self):
         utils.logger.info("[DouYinLogin.login_by_qrcode] Begin login douyin by qrcode...")

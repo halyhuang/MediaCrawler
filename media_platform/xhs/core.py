@@ -424,28 +424,46 @@ class XiaoHongShuCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """Launch browser and create browser context"""
-        utils.logger.info(
-            "[XiaoHongShuCrawler.launch_browser] Begin create browser context ..."
-        )
         if config.SAVE_LOGIN_STATE:
-            # feat issue #14
-            # we will save login state to avoid login every time
-            user_data_dir = os.path.join(
-                os.getcwd(), "browser_data", config.USER_DATA_DIR % config.PLATFORM
-            )  # type: ignore
+            user_data_dir = os.path.join(os.getcwd(), "browser_data",
+                                         config.USER_DATA_DIR % config.PLATFORM)  # type: ignore
             browser_context = await chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
                 accept_downloads=True,
                 headless=headless,
                 proxy=playwright_proxy,  # type: ignore
-                viewport={"width": 1920, "height": 1080},
+                viewport={"width": 1280, "height": 800},  # 使用更合理的窗口大小
                 user_agent=user_agent,
-            )
+                args=[
+                    '--start-maximized',  # 最大化窗口
+                    '--disable-blink-features=AutomationControlled',  # 禁用自动化控制检测
+                    '--disable-infobars',  # 禁用信息栏
+                    '--no-sandbox',  # 禁用沙箱模式
+                    '--disable-setuid-sandbox',  # 禁用setuid沙箱
+                    '--disable-dev-shm-usage',  # 禁用/dev/shm使用
+                    '--disable-accelerated-2d-canvas',  # 禁用加速2D画布
+                    '--disable-gpu'  # 禁用GPU加速
+                ]
+            )  # type: ignore
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(
+                headless=headless, 
+                proxy=playwright_proxy,
+                args=[
+                    '--start-maximized',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-infobars',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu'
+                ]
+            )  # type: ignore
             browser_context = await browser.new_context(
-                viewport={"width": 1920, "height": 1080}, user_agent=user_agent
+                viewport={"width": 1280, "height": 800},
+                user_agent=user_agent
             )
             return browser_context
 
