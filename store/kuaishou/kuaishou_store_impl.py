@@ -123,8 +123,13 @@ class KuaishouDbStoreImplement(AbstractStore):
         video_detail: Dict = await query_content_by_content_id(content_id=video_id)
         if not video_detail:
             content_item["add_ts"] = utils.get_current_timestamp()
+            content_item["add_time"] = utils.get_current_time()
+            content_item["last_modify_time"] = utils.get_current_time()
+            if "timestamp" in content_item:
+                content_item["create_date_time"] = utils.get_time_str_from_unix_time(content_item["timestamp"])
             await add_new_content(content_item)
         else:
+            content_item["last_modify_time"] = utils.get_current_time()
             await update_content_by_content_id(video_id, content_item=content_item)
 
     async def store_comment(self, comment_item: Dict):
@@ -143,8 +148,13 @@ class KuaishouDbStoreImplement(AbstractStore):
         comment_detail: Dict = await query_comment_by_comment_id(comment_id=comment_id)
         if not comment_detail:
             comment_item["add_ts"] = utils.get_current_timestamp()
+            comment_item["add_time"] = utils.get_current_time()
+            comment_item["last_modify_time"] = utils.get_current_time()
+            if "timestamp" in comment_item:
+                comment_item["create_date_time"] = utils.get_time_str_from_unix_time(comment_item["timestamp"])
             await add_new_comment(comment_item)
         else:
+            comment_item["last_modify_time"] = utils.get_current_time()
             await update_comment_by_comment_id(comment_id, comment_item=comment_item)
 
 

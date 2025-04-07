@@ -125,8 +125,13 @@ class TieBaDbStoreImplement(AbstractStore):
         note_detail: Dict = await query_content_by_content_id(content_id=note_id)
         if not note_detail:
             content_item["add_ts"] = utils.get_current_timestamp()
+            content_item["add_time"] = utils.get_current_time()
+            content_item["last_modify_time"] = utils.get_current_time()
+            if "create_time" in content_item:
+                content_item["create_date_time"] = utils.get_time_str_from_unix_time(content_item["create_time"])
             await add_new_content(content_item)
         else:
+            content_item["last_modify_time"] = utils.get_current_time()
             await update_content_by_content_id(note_id, content_item=content_item)
 
     async def store_comment(self, comment_item: Dict):
@@ -145,8 +150,13 @@ class TieBaDbStoreImplement(AbstractStore):
         comment_detail: Dict = await query_comment_by_comment_id(comment_id=comment_id)
         if not comment_detail:
             comment_item["add_ts"] = utils.get_current_timestamp()
+            comment_item["add_time"] = utils.get_current_time()
+            comment_item["last_modify_time"] = utils.get_current_time()
+            if "create_time" in comment_item:
+                comment_item["create_date_time"] = utils.get_time_str_from_unix_time(comment_item["create_time"])
             await add_new_comment(comment_item)
         else:
+            comment_item["last_modify_time"] = utils.get_current_time()
             await update_comment_by_comment_id(comment_id, comment_item=comment_item)
 
     async def store_creator(self, creator: Dict):
@@ -165,8 +175,11 @@ class TieBaDbStoreImplement(AbstractStore):
         user_detail: Dict = await query_creator_by_user_id(user_id)
         if not user_detail:
             creator["add_ts"] = utils.get_current_timestamp()
+            creator["add_time"] = utils.get_current_time()
+            creator["last_modify_time"] = utils.get_current_time()
             await add_new_creator(creator)
         else:
+            creator["last_modify_time"] = utils.get_current_time()
             await update_creator_by_user_id(user_id, creator)
 
 

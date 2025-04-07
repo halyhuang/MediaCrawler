@@ -11,7 +11,8 @@
 
 # 基础配置
 PLATFORM = "dy"
-KEYWORDS = "香港优才，香港专才，香港移民，香港留学"  # 设置抖音搜索关键词
+##  KEYWORDS = "香港优才，香港专才，香港移民，香港留学"  # 设置抖音搜索关键词
+KEYWORDS = "深圳创业，深圳创业搭子，AI创业，创业方向"  # 设置抖音搜索关键词
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 # 登录超时时间设置（秒）
