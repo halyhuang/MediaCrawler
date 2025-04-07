@@ -13,6 +13,7 @@ import asyncio
 import os
 import random
 import time
+import json
 from asyncio import Task
 from typing import Dict, List, Optional, Tuple
 
@@ -44,6 +45,35 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.index_url = "https://www.xiaohongshu.com"
         # self.user_agent = utils.get_user_agent()
         self.user_agent = config.UA if config.UA else "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        self.cookie_file = "xhs_cookies.json"  # Cookie文件路径
+
+    def load_cookies_from_file(self) -> List[Dict]:
+        """从文件加载Cookie"""
+        try:
+            if os.path.exists(self.cookie_file):
+                with open(self.cookie_file, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                # 转换Cookie格式
+                formatted_cookies = []
+                for cookie in cookies:
+                    formatted_cookie = {
+                        'name': cookie.get('name', ''),
+                        'value': cookie.get('value', ''),
+                        'domain': cookie.get('domain', '.xiaohongshu.com'),
+                        'path': cookie.get('path', '/'),
+                        'sameSite': 'Lax',  # 设置sameSite属性
+                        'secure': cookie.get('secure', True),
+                        'httpOnly': cookie.get('httpOnly', True)
+                    }
+                    formatted_cookies.append(formatted_cookie)
+                utils.logger.info(f"成功从{self.cookie_file}加载Cookie")
+                return formatted_cookies
+            else:
+                utils.logger.warning(f"Cookie文件{self.cookie_file}不存在")
+                return []
+        except Exception as e:
+            utils.logger.error(f"加载Cookie文件失败: {str(e)}")
+            return []
 
     async def start(self) -> None:
         playwright_proxy_format, httpx_proxy_format = None, None
@@ -62,6 +92,13 @@ class XiaoHongShuCrawler(AbstractCrawler):
             self.browser_context = await self.launch_browser(
                 chromium, None, self.user_agent, headless=config.HEADLESS
             )
+            
+            # 加载Cookie
+            cookies = self.load_cookies_from_file()
+            if cookies:
+                await self.browser_context.add_cookies(cookies)
+                utils.logger.info("已成功加载Cookie")
+            
             # stealth.min.js is a js script to prevent the website from detecting the crawler.
             await self.browser_context.add_init_script(path="libs/stealth.min.js")
             # add a cookie attribute webId to avoid the appearance of a sliding captcha on the webpage
@@ -432,10 +469,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 accept_downloads=True,
                 headless=headless,
                 proxy=playwright_proxy,  # type: ignore
-                viewport={"width": 1280, "height": 800},  # 使用更合理的窗口大小
+                viewport={"width": 1024, "height": 768},  # 使用更合理的窗口大小
                 user_agent=user_agent,
                 args=[
-                    '--start-maximized',  # 最大化窗口
                     '--disable-blink-features=AutomationControlled',  # 禁用自动化控制检测
                     '--disable-infobars',  # 禁用信息栏
                     '--no-sandbox',  # 禁用沙箱模式
@@ -451,7 +487,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 headless=headless, 
                 proxy=playwright_proxy,
                 args=[
-                    '--start-maximized',
                     '--disable-blink-features=AutomationControlled',
                     '--disable-infobars',
                     '--no-sandbox',
@@ -462,7 +497,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 ]
             )  # type: ignore
             browser_context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                viewport={"width": 1024, "height": 768},
                 user_agent=user_agent
             )
             return browser_context
