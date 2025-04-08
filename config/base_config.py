@@ -10,19 +10,20 @@
 
 
 # 基础配置
-PLATFORM = "dy"
+PLATFORM = "xhs"
 ##  KEYWORDS = "香港优才，香港专才，香港移民，香港留学"  # 设置抖音搜索关键词
-KEYWORDS = "深圳创业，深圳创业搭子，AI创业，创业方向"  # 设置抖音搜索关键词
-LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
+KEYWORDS = "深圳大厂出来创业"  # 设置抖音搜索关键词  深圳创业，深圳创业搭子，AI创业，创业方向
+LOGIN_TYPE = "cookie"  # qrcode or phone or cookie
 COOKIES = ""
 # 登录超时时间设置（秒）
 LOGIN_TIMEOUT = 300
+
 # 具体值参见media_platform.xxx.field下的枚举值，暂时只支持小红书
 SORT_TYPE = "popularity_descending"
 # 具体值参见media_platform.xxx.field下的枚举值，暂时只支持抖音
 PUBLISH_TIME_TYPE = 0
 CRAWLER_TYPE = (
-    "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)
+    "creator"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)
 )
 # 自定义User Agent（暂时仅对XHS有效）
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'

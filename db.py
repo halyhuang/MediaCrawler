@@ -60,14 +60,28 @@ async def init_db():
 
 async def close():
     """
-    关闭连接池
-    Returns:
-
+    关闭数据库连接池
     """
-    utils.logger.info("[close] close mediacrawler db pool")
-    db_pool: aiomysql.Pool = db_conn_pool_var.get()
-    if db_pool is not None:
-        db_pool.close()
+    try:
+        # 获取连接池
+        pool = None
+        try:
+            pool = db_conn_pool_var.get()
+        except Exception as e:
+            utils.logger.error(f"[close] 获取数据库连接池时发生错误: {str(e)}")
+            return
+            
+        # 关闭连接池
+        if pool:
+            try:
+                pool.close()
+                await pool.wait_closed()
+                utils.logger.info("[close] close mediacrawler db pool")
+            except Exception as e:
+                utils.logger.error(f"[close] 关闭数据库连接池时发生错误: {str(e)}")
+    except Exception as e:
+        utils.logger.error(f"[close] 清理数据库资源时发生错误: {str(e)}")
+        raise
 
 
 async def init_table_schema():

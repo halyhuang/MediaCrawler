@@ -39,8 +39,10 @@ class FeedType(Enum):
 
 
 class NoteType(Enum):
-    NORMAL = "normal"
-    VIDEO = "video"
+    """笔记类型"""
+    NORMAL = 0  # 普通笔记
+    VIDEO = 1   # 视频笔记
+    IMAGE = 2   # 图片笔记
 
 
 class SearchSortType(Enum):

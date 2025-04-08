@@ -89,121 +89,62 @@ class KuaiDaiLiProxy(ProxyProvider):
             "password": self.kdl_user_pwd
         }
 
-    async def get_proxies(self, num: int) -> List[IpInfoModel]:
+    async def get_proxies(self, num: int = 1) -> List[IpInfoModel]:
         """
-        快代理实现
+        从快代理API获取代理IP
         Args:
-            num:
-
+            num: 需要获取的代理IP数量，默认为1
         Returns:
-
+            List[IpInfoModel]: 代理IP列表
         """
-        uri = "/api/getdps/"
-
-        # 优先从缓存中拿 IP
-        ip_cache_list = self.ip_cache.load_all_ip(proxy_brand_name=self.proxy_brand_name)
-        if len(ip_cache_list) >= num:
-            utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 从缓存中获取到 {len(ip_cache_list)} 个代理IP")
-            return ip_cache_list[:num]
-
-        # 如果缓存中的数量不够，从IP代理商获取补上，再存入缓存中
-        need_get_count = num - len(ip_cache_list)
-        
-        # 构建API请求URL
-        api_url = f"{self.api_base}{uri}?secret_id={self.secret_id}&signature={self.signature}&num={need_get_count}&pt=1&sep=1&format=json"
-        
-        ip_infos: List[IpInfoModel] = []
-        max_retries = 3
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 尝试从快代理API获取代理IP，URL: {api_url}")
-                    response = await client.get(api_url)
-
-                    if response.status_code != 200:
-                        utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 状态码不是200，响应内容: {response.text}")
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 第{retry_count}次重试...")
-                            await asyncio.sleep(2)  # 等待2秒后重试
-                            continue
-                        else:
-                            # 如果重试次数用完，尝试使用缓存中的IP
-                            if ip_cache_list:
-                                utils.logger.warning(f"[KuaiDaiLiProxy.get_proxies] API请求失败，使用缓存中的{len(ip_cache_list)}个代理IP")
-                                return ip_cache_list[:num]
-                            else:
-                                raise Exception("get ip error from proxy provider and status code not 200 ...")
-
-                    ip_response: Dict = response.json()
-                    if ip_response.get("code") != 0:
-                        utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 响应码不是0，消息: {ip_response.get('msg')}")
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 第{retry_count}次重试...")
-                            await asyncio.sleep(2)  # 等待2秒后重试
-                            continue
-                        else:
-                            # 如果重试次数用完，尝试使用缓存中的IP
-                            if ip_cache_list:
-                                utils.logger.warning(f"[KuaiDaiLiProxy.get_proxies] API请求失败，使用缓存中的{len(ip_cache_list)}个代理IP")
-                                return ip_cache_list[:num]
-                            else:
-                                raise Exception("get ip error from proxy provider and code not 0 ...")
-
-                    proxy_list: List[str] = ip_response.get("data", {}).get("proxy_list", [])
-                    if not proxy_list:
-                        utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 代理IP列表为空，响应内容: {ip_response}")
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 第{retry_count}次重试...")
-                            await asyncio.sleep(2)  # 等待2秒后重试
-                            continue
-                        else:
-                            # 如果重试次数用完，尝试使用缓存中的IP
-                            if ip_cache_list:
-                                utils.logger.warning(f"[KuaiDaiLiProxy.get_proxies] API请求失败，使用缓存中的{len(ip_cache_list)}个代理IP")
-                                return ip_cache_list[:num]
-                            else:
-                                raise Exception("get ip error from proxy provider and proxy list is empty ...")
-                    
-                    utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 成功获取到{len(proxy_list)}个代理IP")
-                    
-                    for proxy in proxy_list:
-                        try:
-                            proxy_model = parse_kuaidaili_proxy(proxy)
-                            ip_info_model = IpInfoModel(
-                                ip=proxy_model.ip,
-                                port=proxy_model.port,
-                                user=self.kdl_user_name,
-                                password=self.kdl_user_pwd,
-                                expired_time_ts=proxy_model.expire_ts,
-                            )
-                            ip_key = f"{self.proxy_brand_name}_{ip_info_model.ip}_{ip_info_model.port}"
-                            self.ip_cache.set_ip(ip_key, ip_info_model.model_dump_json(), ex=ip_info_model.expired_time_ts)
-                            ip_infos.append(ip_info_model)
-                        except Exception as e:
-                            utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 解析代理IP失败: {proxy}, 错误: {str(e)}")
-                            continue
-                    
-                    break  # 成功获取代理IP，跳出循环
-            except Exception as e:
-                utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 请求快代理API异常: {str(e)}")
-                retry_count += 1
-                if retry_count < max_retries:
-                    utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 第{retry_count}次重试...")
-                    await asyncio.sleep(2)  # 等待2秒后重试
-                else:
-                    # 如果重试次数用完，尝试使用缓存中的IP
-                    if ip_cache_list:
-                        utils.logger.warning(f"[KuaiDaiLiProxy.get_proxies] API请求失败，使用缓存中的{len(ip_cache_list)}个代理IP")
-                        return ip_cache_list[:num]
+        try:
+            # 构建API请求URL
+            api_url = f"https://dps.kdlapi.com/api/getdps/?secret_id={self.secret_id}&signature={self.signature}&num={num}&pt=1&sep=1&format=json"
+            utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 尝试从快代理API获取代理IP，URL: {api_url}")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(api_url)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("code") == 0 and data.get("data"):
+                        proxy_list = data["data"]["proxy_list"]
+                        utils.logger.info(f"[KuaiDaiLiProxy.get_proxies] 成功获取到{len(proxy_list)}个代理IP")
+                        
+                        # 解析代理IP信息
+                        ip_info_list = []
+                        for proxy in proxy_list:
+                            try:
+                                ip, port = proxy.split(":")
+                                # 计算过期时间（10分钟后）
+                                expired_time_ts = int(time.time()) + 600
+                                
+                                ip_info = IpInfoModel(
+                                    ip=ip,
+                                    port=int(port),
+                                    user=self.kdl_user_name,  # 使用user而不是username
+                                    password=self.kdl_user_pwd,
+                                    expired_time_ts=expired_time_ts  # 添加过期时间
+                                )
+                                ip_info_list.append(ip_info)
+                                
+                                # 缓存代理IP信息
+                                cache_key = f"proxy:{ip}:{port}"
+                                await self.ip_cache.set(cache_key, ip_info, expire_seconds=600)  # 10分钟过期
+                                
+                            except Exception as e:
+                                utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 解析代理IP失败: {proxy}, 错误: {str(e)}")
+                                continue
+                        
+                        return ip_info_list
                     else:
-                        raise Exception(f"get ip error from proxy provider: {str(e)}")
-
-        return ip_cache_list + ip_infos
+                        utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] API返回错误: {data}")
+                else:
+                    utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] API请求失败: {response.status_code}")
+                
+        except Exception as e:
+            utils.logger.error(f"[KuaiDaiLiProxy.get_proxies] 获取代理IP失败: {str(e)}")
+        
+        return []
 
 
 def new_kuai_daili_proxy() -> KuaiDaiLiProxy:

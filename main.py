@@ -13,6 +13,8 @@ import asyncio
 import sys
 import argparse
 import traceback
+import signal
+from typing import Dict, List
 
 import cmd_arg
 import config
@@ -71,10 +73,56 @@ def parse_args():
     return parser.parse_args()
 
 
+# 全局变量存储爬虫实例
+crawlers = []
+
+async def cleanup():
+    """
+    清理资源
+    """
+    try:
+        # 关闭所有爬虫实例
+        for crawler in crawlers:
+            try:
+                await crawler.close()
+                utils.logger.info("爬虫已关闭")
+            except Exception as e:
+                utils.logger.error(f"关闭爬虫时发生错误: {str(e)}")
+        
+        # 关闭缓存
+        try:
+            from cache.local_cache import ExpiringLocalCache
+            cache = ExpiringLocalCache()
+            await cache.close()
+            utils.logger.info("缓存已关闭")
+        except Exception as e:
+            utils.logger.error(f"关闭缓存时发生错误: {str(e)}")
+            
+        # 关闭数据库连接
+        try:
+            await db.close()
+            utils.logger.info("数据库连接已关闭")
+        except Exception as e:
+            utils.logger.error(f"关闭数据库连接时发生错误: {str(e)}")
+            
+    except Exception as e:
+        utils.logger.error(f"清理资源时发生错误: {str(e)}")
+
+def signal_handler(signum, frame):
+    """
+    信号处理函数
+    """
+    utils.logger.info("\nReceived signal to terminate. Cleaning up...")
+    asyncio.create_task(cleanup())
+    sys.exit(0)
+
 async def main():
-    # 初始化数据库连接
-    await init_db()
-    utils.logger.info("Database connection initialized successfully")
+    # 设置信号处理
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # 初始化日志
+    utils.init_loging_config()
 
     # 解析命令行参数
     args = parse_args()
@@ -87,64 +135,57 @@ async def main():
     if hasattr(args, 'keyword') and args.keyword:
         source_keyword_var.set(args.keyword)
 
-    # 创建爬虫实例
-    crawler = None
-    message_listener = None
     try:
-        if platform == "xhs":
+        # 初始化数据库连接
+        await init_db()
+        utils.logger.info("Database connection initialized successfully")
+
+        # 设置全局配置
+        config.PLATFORM = platform
+        config.LOGIN_TYPE = login_type
+        config.CRAWLER_TYPE = crawler_type
+        if args.keyword:
+            config.KEYWORDS = args.keyword
+            
+        utils.logger.info(f"配置已更新 - 平台: {config.PLATFORM}, 登录类型: {config.LOGIN_TYPE}, 爬虫类型: {config.CRAWLER_TYPE}, 关键词: {config.KEYWORDS}")
+
+        # 创建并启动爬虫
+        if platform == 'xhs':
             crawler = XiaoHongShuCrawler()
-        elif platform == "dy":
+            await crawler._init_browser()  # 显式调用异步初始化方法
+            crawlers.append(crawler)
+            await crawler.start()
+        elif platform == 'douyin':
             crawler = DouYinCrawler()
-            # 创建消息监听器
-            message_listener = DouYinMessageListener()
-        elif platform == "ks":
-            crawler = KuaishouCrawler()
-        elif platform == "bili":
-            crawler = BilibiliCrawler()
-        elif platform == "weibo":
-            crawler = WeiboCrawler()
-        elif platform == "tieba":
-            crawler = TieBaCrawler()
-        elif platform == "zhihu":
-            crawler = ZhihuCrawler()
+            crawlers.append(crawler)
+            # 添加抖音相关的处理逻辑
         else:
-            utils.logger.error(f"Unsupported platform: {platform}")
+            utils.logger.error(f"不支持的平台: {platform}")
             return
 
-        # 启动爬虫
-        await crawler.start()
-        
-        # 如果是抖音平台，启动消息监听
-        if platform == "dy" and message_listener:
-            # 创建消息监听任务
-            message_task = asyncio.create_task(message_listener.start_listening(crawler.dy_client))
-            
-        if crawler_type == "follow" and isinstance(crawler, DouYinCrawler):
-            if args.sec_uid:
-                await crawler.follow_user_by_sec_uid(args.sec_uid)
-            else:
-                await crawler.search_and_follow_user(args.user)
-        elif crawler_type == "test" and isinstance(crawler, DouYinCrawler):
-            await crawler.test_search_user_by_sec_uid(args.sec_uid)
-            
     except Exception as e:
-        utils.logger.error(f"Crawler error: {str(e)}")
-        traceback.print_exc()
+        utils.logger.error(f"主程序执行出错: {str(e)}")
     finally:
-        # 关闭爬虫
-        if crawler:
-            try:
-                await crawler.close()
-            except Exception as e:
-                utils.logger.error(f"Error closing crawler: {str(e)}")
-                traceback.print_exc()
+        # 清理资源
+        await cleanup()
 
 
 if __name__ == '__main__':
+    # 创建新的事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     try:
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # 运行主程序
         loop.run_until_complete(main())
+        
     except KeyboardInterrupt:
-        sys.exit()
+        utils.logger.info("程序被用户中断")
+    except Exception as e:
+        utils.logger.error(f"程序执行出错: {str(e)}")
+    finally:
+        # 关闭事件循环
+        if loop.is_running():
+            loop.stop()
+        if not loop.is_closed():
+            loop.close()

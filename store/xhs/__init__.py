@@ -75,7 +75,6 @@ async def update_xhs_note(note_item: Dict):
 
     """
     note_id = note_item.get("note_id")
-    user_info = note_item.get("user", {})
     interact_info = note_item.get("interact_info", {})
     image_list: List[Dict] = note_item.get("image_list", [])
     tag_list: List[Dict] = note_item.get("tag_list", [])
@@ -94,9 +93,9 @@ async def update_xhs_note(note_item: Dict):
         "video_url": video_url, # 帖子视频url
         "time": note_item.get("time"), # 帖子发布时间
         "last_update_time": note_item.get("last_update_time", 0), # 帖子最后更新时间
-        "user_id": user_info.get("user_id"), # 用户id
-        "nickname": user_info.get("nickname"), # 用户昵称
-        "avatar": user_info.get("avatar"), # 用户头像
+        "user_id": note_item.get("user_id"), # 用户id
+        "nickname": note_item.get("nickname"), # 用户昵称
+        "avatar": note_item.get("avatar"), # 用户头像
         "liked_count": interact_info.get("liked_count"), # 点赞数
         "collected_count": interact_info.get("collected_count"), # 收藏数
         "comment_count": interact_info.get("comment_count"), # 评论数
@@ -143,11 +142,22 @@ async def update_xhs_note_comment(note_id: str, comment_item: Dict):
     comment_id = comment_item.get("id")
     comment_pictures = [item.get("url_default", "") for item in comment_item.get("pictures", [])]
     target_comment = comment_item.get("target_comment", {})
+    
+    # 获取笔记标题，如果comment_item中没有，则从note_title字段获取，如果仍为空则使用默认值
+    note_title = comment_item.get("note_title", "")
+    if not note_title:
+        # 尝试从其他字段获取标题
+        note_title = comment_item.get("title", "")
+    if not note_title:
+        # 如果仍然为空，使用默认值
+        note_title = "未知标题"
+    
     local_db_item = {
         "comment_id": comment_id, # 评论id
         "create_time": comment_item.get("create_time"), # 评论时间
         "ip_location": comment_item.get("ip_location"), # ip地址
         "note_id": note_id, # 帖子id
+        "note_title": note_title, # 笔记标题
         "content": comment_item.get("content"), # 评论内容
         "user_id": user_info.get("user_id"), # 用户id
         "nickname": user_info.get("nickname"), # 用户昵称
@@ -205,6 +215,7 @@ async def save_creator(user_id: str, creator: Dict):
         'interaction': interaction, # 互动数
         'tag_list': json.dumps({tag.get('tagType'): tag.get('name') for tag in creator.get('tags')},
                                ensure_ascii=False), # 标签
+        "add_ts": utils.get_current_timestamp(), # 添加时间戳
         "last_modify_ts": utils.get_current_timestamp(), # 最后更新时间戳（MediaCrawler程序生成的，主要用途在db存储的时候记录一条记录最新更新时间）
     }
     utils.logger.info(f"[store.xhs.save_creator] creator:{local_db_item}")

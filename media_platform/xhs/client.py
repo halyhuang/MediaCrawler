@@ -32,7 +32,7 @@ from .help import get_search_id, sign
 class XiaoHongShuClient(AbstractApiClient):
     def __init__(
         self,
-        timeout=10,
+        timeout=30,
         proxies=None,
         *,
         headers: Dict[str, str],
@@ -81,41 +81,80 @@ class XiaoHongShuClient(AbstractApiClient):
         self.headers.update(headers)
         return self.headers
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-    async def request(self, method, url, **kwargs) -> Union[str, Any]:
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+    async def request(
+        self,
+        method: str,
+        url: str,
+        return_response: bool = False,
+        max_retries: int = 3,
+        **kwargs,
+    ) -> Union[Dict, str]:
         """
-        封装httpx的公共请求方法，对请求响应做一些处理
+        发送HTTP请求
         Args:
             method: 请求方法
-            url: 请求的URL
-            **kwargs: 其他请求参数，例如请求头、请求体等
+            url: 请求URL
+            return_response: 是否返回原始响应
+            max_retries: 最大重试次数
+            **kwargs: 其他参数
 
         Returns:
 
         """
-        # return response.text
-        return_response = kwargs.pop("return_response", False)
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                async with httpx.AsyncClient(proxies=self.proxies) as client:
+                    response = await client.request(method, url, timeout=self.timeout, **kwargs)
 
-        async with httpx.AsyncClient(proxies=self.proxies) as client:
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
+                if response.status_code == 471 or response.status_code == 461:
+                    # 遇到验证码，等待用户手动处理
+                    verify_type = response.headers.get("Verifytype", "")
+                    verify_uuid = response.headers.get("Verifyuuid", "")
+                    utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码，请手动处理。Verifytype: {verify_type}, Verifyuuid: {verify_uuid}")
+                    
+                    # 等待用户手动处理验证码
+                    await asyncio.sleep(30)  # 等待30秒
+                    retry_count += 1
+                    continue
+                
+                if response.status_code != 200:
+                    utils.logger.error(f"[XiaoHongShuClient.request] Request failed with status code: {response.status_code}, response: {response.text}")
+                    retry_count += 1
+                    await asyncio.sleep(5)  # 等待5秒后重试
+                    continue
 
-        if response.status_code == 471 or response.status_code == 461:
-            # someday someone maybe will bypass captcha
-            verify_type = response.headers["Verifytype"]
-            verify_uuid = response.headers["Verifyuuid"]
-            raise Exception(
-                f"出现验证码，请求失败，Verifytype: {verify_type}，Verifyuuid: {verify_uuid}, Response: {response}"
-            )
+                if return_response:
+                    return response.text
+                    
+                try:
+                    data: Dict = response.json()
+                except json.JSONDecodeError as e:
+                    utils.logger.error(f"[XiaoHongShuClient.request] Failed to parse JSON response: {str(e)}, response: {response.text}")
+                    retry_count += 1
+                    await asyncio.sleep(5)
+                    continue
 
-        if return_response:
-            return response.text
-        data: Dict = response.json()
-        if data["success"]:
-            return data.get("data", data.get("success", {}))
-        elif data["code"] == self.IP_ERROR_CODE:
-            raise IPBlockError(self.IP_ERROR_STR)
-        else:
-            raise DataFetchError(data.get("msg", None))
+                if data.get("success"):
+                    return data.get("data", data.get("success", {}))
+                elif data.get("code") == self.IP_ERROR_CODE:
+                    raise IPBlockError(self.IP_ERROR_STR)
+                else:
+                    error_msg = data.get("msg", "Unknown error")
+                    utils.logger.error(f"[XiaoHongShuClient.request] API error: {error_msg}")
+                    raise DataFetchError(error_msg)
+                    
+            except httpx.RequestError as e:
+                utils.logger.error(f"[XiaoHongShuClient.request] Request error: {str(e)}")
+                retry_count += 1
+                await asyncio.sleep(5)
+                continue
+            except Exception as e:
+                utils.logger.error(f"[XiaoHongShuClient.request] Unexpected error: {str(e)}")
+                raise
+
+        raise DataFetchError(f"Failed after {max_retries} retries")
 
     async def get(self, uri: str, params=None) -> Dict:
         """
@@ -229,7 +268,20 @@ class XiaoHongShuClient(AbstractApiClient):
             "sort": sort.value,
             "note_type": note_type.value,
         }
-        return await self.post(uri, data)
+        utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
+        try:
+            response = await self.post(uri, data)
+            utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
+            return response
+        except IPBlockError as e:
+            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] IP blocked: {str(e)}")
+            raise
+        except DataFetchError as e:
+            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Data fetch error: {str(e)}")
+            raise
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Unexpected error: {str(e)}")
+            raise
 
     async def get_note_by_id(
         self, note_id: str, xsec_source: str, xsec_token: str
@@ -342,6 +394,11 @@ class XiaoHongShuClient(AbstractApiClient):
         result = []
         comments_has_more = True
         comments_cursor = ""
+        
+        # 获取笔记详情，用于提取笔记标题
+        note_detail = await self.get_note_by_id(note_id, "", xsec_token)
+        note_title = note_detail.get("title", "") or note_detail.get("desc", "")[:255] or "未知标题"
+        
         while comments_has_more and len(result) < max_count:
             comments_res = await self.get_note_comments(
                 note_id=note_id, xsec_token=xsec_token, cursor=comments_cursor
@@ -356,6 +413,11 @@ class XiaoHongShuClient(AbstractApiClient):
             comments = comments_res["comments"]
             if len(result) + len(comments) > max_count:
                 comments = comments[: max_count - len(result)]
+                
+            # 为每条评论添加笔记标题
+            for comment in comments:
+                comment["note_title"] = note_title
+                
             if callback:
                 await callback(note_id, comments)
             await asyncio.sleep(crawl_interval)
@@ -397,7 +459,13 @@ class XiaoHongShuClient(AbstractApiClient):
         for comment in comments:
             note_id = comment.get("note_id")
             sub_comments = comment.get("sub_comments")
+            # 获取父评论中的笔记标题
+            note_title = comment.get("note_title", "未知标题")
+            
             if sub_comments and callback:
+                # 为子评论添加笔记标题
+                for sub_comment in sub_comments:
+                    sub_comment["note_title"] = note_title
                 await callback(note_id, sub_comments)
 
             sub_comment_has_more = comment.get("sub_comment_has_more")
@@ -423,6 +491,9 @@ class XiaoHongShuClient(AbstractApiClient):
                     )
                     break
                 comments = comments_res["comments"]
+                # 为子评论添加笔记标题
+                for sub_comment in comments:
+                    sub_comment["note_title"] = note_title
                 if callback:
                     await callback(note_id, comments)
                 await asyncio.sleep(crawl_interval)

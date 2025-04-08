@@ -23,53 +23,108 @@ from cache.abs_cache import AbstractCache
 
 
 class ExpiringLocalCache(AbstractCache):
+    """
+    本地缓存，支持过期时间
+    """
+    def __init__(self):
+        self._cache = {}
+        self._expire_times = {}
+        self._lock = asyncio.Lock()
+        self._clear_task = None
+        self._is_running = True
+        # 移除在初始化时启动定时任务
+        # self._start_clear_cron()
 
-    def __init__(self, cron_interval: int = 10):
+    async def ensure_clear_task(self):
         """
-        初始化本地缓存
-        :param cron_interval: 定时清楚cache的时间间隔
-        :return:
+        确保清理任务已启动
         """
-        self._cron_interval = cron_interval
-        self._cache_container: Dict[str, Tuple[Any, float]] = {}
-        self._cron_task: Optional[asyncio.Task] = None
-        # 开启定时清理任务
-        self._schedule_clear()
+        if self._clear_task is None:
+            self._start_clear_cron()
 
-    def __del__(self):
+    def _start_clear_cron(self):
         """
-        析构函数，清理定时任务
-        :return:
+        启动定时清理任务
         """
-        if self._cron_task is not None:
-            self._cron_task.cancel()
+        async def clear_expired():
+            while self._is_running:
+                try:
+                    await self._clear_expired()
+                except Exception as e:
+                    utils.logger.error(f"清理过期缓存时发生错误: {str(e)}")
+                await asyncio.sleep(60)  # 每分钟清理一次
 
-    def get(self, key: str) -> Optional[Any]:
+        self._clear_task = asyncio.create_task(clear_expired())
+
+    async def close(self):
         """
-        从缓存中获取键的值
-        :param key:
-        :return:
+        关闭缓存，清理资源
         """
-        value, expire_time = self._cache_container.get(key, (None, 0))
-        if value is None:
+        self._is_running = False
+        if self._clear_task:
+            self._clear_task.cancel()
+            try:
+                await self._clear_task
+            except asyncio.CancelledError:
+                pass
+        await self._clear_expired()
+        self._cache.clear()
+        self._expire_times.clear()
+
+    async def _clear_expired(self):
+        """
+        清理过期的缓存
+        """
+        async with self._lock:
+            now = time.time()
+            expired_keys = [k for k, t in self._expire_times.items() if t <= now]
+            for k in expired_keys:
+                self._cache.pop(k, None)
+                self._expire_times.pop(k, None)
+
+    async def get(self, key):
+        """
+        获取缓存值
+        """
+        await self.ensure_clear_task()
+        async with self._lock:
+            if key in self._cache:
+                expire_time = self._expire_times.get(key)
+                if expire_time is None or expire_time > time.time():
+                    return self._cache[key]
+                else:
+                    # 已过期，删除
+                    self._cache.pop(key)
+                    self._expire_times.pop(key)
             return None
 
-        # 如果键已过期，则删除键并返回None
-        if expire_time < time.time():
-            del self._cache_container[key]
-            return None
-
-        return value
-
-    def set(self, key: str, value: Any, expire_time: int) -> None:
+    async def set(self, key, value, expire_seconds=None):
         """
-        将键的值设置到缓存中
-        :param key:
-        :param value:
-        :param expire_time:
-        :return:
+        设置缓存值
         """
-        self._cache_container[key] = (value, time.time() + expire_time)
+        await self.ensure_clear_task()
+        async with self._lock:
+            self._cache[key] = value
+            if expire_seconds is not None:
+                self._expire_times[key] = time.time() + expire_seconds
+            else:
+                self._expire_times.pop(key, None)
+
+    async def delete(self, key):
+        """
+        删除缓存值
+        """
+        async with self._lock:
+            self._cache.pop(key, None)
+            self._expire_times.pop(key, None)
+
+    async def clear(self):
+        """
+        清空缓存
+        """
+        async with self._lock:
+            self._cache.clear()
+            self._expire_times.clear()
 
     def keys(self, pattern: str) -> List[str]:
         """
@@ -78,49 +133,17 @@ class ExpiringLocalCache(AbstractCache):
         :return:
         """
         if pattern == '*':
-            return list(self._cache_container.keys())
+            return list(self._cache.keys())
 
         # 本地缓存通配符暂时将*替换为空
         if '*' in pattern:
             pattern = pattern.replace('*', '')
 
-        return [key for key in self._cache_container.keys() if pattern in key]
-
-    def _schedule_clear(self):
-        """
-        开启定时清理任务,
-        :return:
-        """
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        self._cron_task = loop.create_task(self._start_clear_cron())
-
-    def _clear(self):
-        """
-        根据过期时间清理缓存
-        :return:
-        """
-        for key, (value, expire_time) in self._cache_container.items():
-            if expire_time < time.time():
-                del self._cache_container[key]
-
-    async def _start_clear_cron(self):
-        """
-        开启定时清理任务
-        :return:
-        """
-        while True:
-            self._clear()
-            await asyncio.sleep(self._cron_interval)
+        return [key for key in self._cache.keys() if pattern in key]
 
 
 if __name__ == '__main__':
-    cache = ExpiringLocalCache(cron_interval=2)
+    cache = ExpiringLocalCache()
     cache.set('name', '程序员阿江-Relakkes', 3)
     print(cache.get('key'))
     print(cache.keys("*"))

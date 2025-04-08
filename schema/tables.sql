@@ -300,12 +300,16 @@ CREATE TABLE `xhs_creator`
     `ip_location`    varchar(255) DEFAULT NULL COMMENT '评论时的IP地址',
     `add_ts`         bigint      NOT NULL COMMENT '记录添加时间戳',
     `last_modify_ts` bigint      NOT NULL COMMENT '记录最后修改时间戳',
+    `add_time`       varchar(32)  DEFAULT NULL COMMENT '记录添加时间',
+    `last_modify_time` varchar(32)  DEFAULT NULL COMMENT '记录最后修改时间',
+    `create_date_time` varchar(32)  DEFAULT NULL COMMENT '笔记发布时间',
     `desc`           longtext COMMENT '用户描述',
     `gender`         varchar(1)   DEFAULT NULL COMMENT '性别',
     `follows`        varchar(16)  DEFAULT NULL COMMENT '关注数',
     `fans`           varchar(16)  DEFAULT NULL COMMENT '粉丝数',
     `interaction`    varchar(16)  DEFAULT NULL COMMENT '获赞和收藏数',
     `tag_list`       longtext COMMENT '标签列表',
+    `notes`       longtext COMMENT '用户笔记列表，最多保存3篇',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='小红书博主';
 
@@ -363,6 +367,7 @@ CREATE TABLE `xhs_note_comment`
     `comment_id`        varchar(64) NOT NULL COMMENT '评论ID',
     `create_time`       bigint      NOT NULL COMMENT '评论时间戳',
     `note_id`           varchar(64) NOT NULL COMMENT '笔记ID',
+    `note_title`        varchar(255) DEFAULT '未知标题' COMMENT '笔记标题',
     `content`           longtext    NOT NULL COMMENT '评论内容',
     `sub_comment_count` int         NOT NULL COMMENT '子评论数量',
     `like_count` VARCHAR(64) DEFAULT NULL COMMENT '评论点赞数量', 

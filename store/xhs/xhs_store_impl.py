@@ -114,28 +114,39 @@ class XhsCsvStoreImplement(AbstractStore):
 class XhsDbStoreImplement(AbstractStore):
     async def store_content(self, content_item: Dict):
         """
-        Xiaohongshu content DB storage implementation
+        小红书内容DB存储实现
         Args:
-            content_item: content item dict
+            content_item: 内容字典
 
         Returns:
 
         """
+        utils.logger.info(f"[XhsDbStoreImplement.store_content] Attempting to store content: {content_item}")
         from .xhs_store_sql import (add_new_content,
-                                    query_content_by_content_id,
-                                    update_content_by_content_id)
+                                  query_content_by_content_id,
+                                  update_content_by_content_id)
         note_id = content_item.get("note_id")
-        note_detail: Dict = await query_content_by_content_id(content_id=note_id)
-        if not note_detail:
-            content_item["add_ts"] = utils.get_current_timestamp()
-            content_item["add_time"] = utils.get_current_time()
-            content_item["last_modify_time"] = utils.get_current_time()
-            if "time" in content_item:
-                content_item["create_date_time"] = utils.get_time_str_from_unix_time(content_item["time"])
-            await add_new_content(content_item)
-        else:
-            content_item["last_modify_time"] = utils.get_current_time()
-            await update_content_by_content_id(note_id, content_item=content_item)
+        if not note_id:
+            utils.logger.error("[XhsDbStoreImplement.store_content] No note_id found in content_item")
+            return
+            
+        try:
+            note_detail: Dict = await query_content_by_content_id(content_id=note_id)
+            if not note_detail:
+                utils.logger.info(f"[XhsDbStoreImplement.store_content] Adding new content for note_id: {note_id}")
+                content_item["add_ts"] = utils.get_current_timestamp()
+                content_item["add_time"] = utils.get_current_time()
+                content_item["last_modify_time"] = utils.get_current_time()
+                if "time" in content_item:
+                    content_item["create_date_time"] = utils.get_time_str_from_unix_time(content_item["time"])
+                await add_new_content(content_item)
+            else:
+                utils.logger.info(f"[XhsDbStoreImplement.store_content] Updating existing content for note_id: {note_id}")
+                content_item["last_modify_time"] = utils.get_current_time()
+                await update_content_by_content_id(note_id, content_item=content_item)
+        except Exception as e:
+            utils.logger.error(f"[XhsDbStoreImplement.store_content] Error storing content: {str(e)}")
+            raise
 
     async def store_comment(self, comment_item: Dict):
         """
