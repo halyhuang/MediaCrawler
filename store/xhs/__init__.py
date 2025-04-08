@@ -215,6 +215,7 @@ async def save_creator(user_id: str, creator: Dict):
         'interaction': interaction, # 互动数
         'tag_list': json.dumps({tag.get('tagType'): tag.get('name') for tag in creator.get('tags')},
                                ensure_ascii=False), # 标签
+        'notes': creator.get('notes', []), # 添加notes字段
         "add_ts": utils.get_current_timestamp(), # 添加时间戳
         "last_modify_ts": utils.get_current_timestamp(), # 最后更新时间戳（MediaCrawler程序生成的，主要用途在db存储的时候记录一条记录最新更新时间）
     }

@@ -48,7 +48,7 @@ async def save_creator(user_id: str, creator: Dict):
             "age": creator.get("age", ""),
             "followers": creator.get("followers", 0),
             "following": creator.get("following", 0),
-            "notes": creator.get("notes", [])[:3]  # 限制最多保存3篇笔记
+            "notes": creator.get("notes", [])
         }
         
         if existing_creator:

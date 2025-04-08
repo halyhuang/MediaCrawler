@@ -346,7 +346,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         note_type=SearchNoteType.ALL,  # 使用SearchNoteType.ALL来获取所有类型的笔记
                     )
                     
-                    utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Search response: {notes_res}")
                     utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Current page: {page}, Search ID: {search_id}")
                     
                     if not notes_res:
@@ -376,8 +375,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         user_id = user_info.get("user_id")
                         
                         utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Processing post_item: {post_item}")
-                        utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Processing note_card: {note_card}")
-                        utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Processing user_info: {user_info}")
                         
                         if not user_id:
                             # 尝试从其他位置获取user_id
@@ -390,7 +387,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                         
                         # 构建笔记信息
                         image_list = note_card.get("image_list", [])
-                        utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Image list structure: {image_list}")
                         
                         # 构建笔记信息
                         note_info = {
@@ -469,22 +465,30 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             except Exception as e:
                                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 获取作者完整信息失败: {str(e)}")
                             
+                            # 创建简化的笔记信息
+                            simplified_note = {
+                                "title": note_info["title"],
+                                "desc": note_info["desc"]}
+                            
                             # 更新笔记列表
                             if user_id in processed_creators:
                                 # 如果作者已存在，更新笔记列表（限制最多3篇）
-                                current_notes = processed_creators[user_id].get("notes", [])
-                                if len(current_notes) < 3:
-                                    current_notes.append(note_info)
-                                    creator_info["notes"] = current_notes
+                                current_notes = processed_creators[user_id].get("notes", [])  
+                                current_notes.append(simplified_note)
+                                creator_info["notes"] = current_notes
+                                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 为已存在作者添加笔记: {user_id}, 当前笔记数: {len(current_notes)}")
                             else:
                                 # 如果是新作者，初始化笔记列表
-                                creator_info["notes"] = [note_info]
+                                creator_info["notes"] = [simplified_note]
+                                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 为新作者创建笔记列表: {user_id}")
                             
                             # 立即保存作者信息到数据库
                             utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 开始保存作者信息到数据库: {user_id}")
                             try:
+                                # 确保notes字段是JSON字符串
+                                creator_info["notes"] = json.dumps(creator_info["notes"], ensure_ascii=False)
                                 await xhs_store.save_creator(user_id, creator=creator_info)
-                                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功保存作者信息: {user_id}")
+                                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功保存作者信息: {user_id}, notes: {creator_info['notes']}")
                             except Exception as e:
                                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 保存作者信息到数据库失败: {str(e)}")
                                 # 打印更详细的错误信息
