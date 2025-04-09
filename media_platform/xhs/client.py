@@ -152,32 +152,37 @@ class XiaoHongShuClient(AbstractApiClient):
     async def _pre_headers(self, url: str, data=None) -> Dict:
         """
         请求头参数签名
-        Args:
-            url:
-            data:
-
-        Returns:
-
         """
-        encrypt_params = await self.playwright_page.evaluate(
-            "([url, data]) => window._webmsxyw(url,data)", [url, data]
-        )
-        local_storage = await self.playwright_page.evaluate("() => window.localStorage")
-        signs = sign(
-            a1=self.cookie_dict.get("a1", ""),
-            b1=local_storage.get("b1", ""),
-            x_s=encrypt_params.get("X-s", ""),
-            x_t=str(encrypt_params.get("X-t", "")),
-        )
-
-        headers = {
-            "X-S": signs["x-s"],
-            "X-T": signs["x-t"],
-            "x-S-Common": signs["x-s-common"],
-            "X-B3-Traceid": signs["x-b3-traceid"],
-        }
-        self.headers.update(headers)
-        return self.headers
+        try:
+            # 获取页面上下文中的签名数据
+            sign_data = await self.playwright_page.evaluate("""
+                () => {
+                    const data = {};
+                    if (window._XSDATA) {
+                        data.xs = window._XSDATA.xs || '';
+                        data.xt = window._XSDATA.xt || '';
+                        data.xsCommon = window._XSDATA.xsCommon || '';
+                    }
+                    return data;
+                }
+            """)
+            
+            utils.logger.info(f"[XiaoHongShuClient._pre_headers] 获取签名数据: {sign_data}")
+            
+            # 使用页面中的签名数据
+            headers = {
+                "X-S": sign_data.get("xs", ""),
+                "X-T": sign_data.get("xt", str(int(time.time()))),
+                "X-S-Common": sign_data.get("xsCommon", ""),
+                "X-B3-Traceid": str(random.randint(100000, 999999))
+            }
+            
+            self.headers.update(headers)
+            return headers
+            
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient._pre_headers] 获取签名数据失败: {str(e)}")
+            return await super()._pre_headers(url, data)
 
     async def request(
         self,
@@ -409,53 +414,58 @@ class XiaoHongShuClient(AbstractApiClient):
                     await self.playwright_page.wait_for_load_state("domcontentloaded")
                     await self.playwright_page.wait_for_load_state("networkidle")
                     
-                    # 尝试多个可能的搜索框选择器
-                    search_selectors = [
-                        "input[type='search']",
-                        "input[placeholder*='搜索']",
-                        "//input[@type='search']",
-                        "//input[contains(@placeholder, '搜索')]"
-                    ]
+                    # 获取初始化数据
+                    initial_data = await self.playwright_page.evaluate("""
+                        () => {
+                            const data = {};
+                            data.webId = window.localStorage.getItem('webId') || '';
+                            data.websiteConfig = window._globalConfig || {};
+                            data.extraHeaders = window.__INITIAL_STATE__ || {};
+                            return data;
+                        }
+                    """)
                     
-                    search_input = None
-                    for selector in search_selectors:
-                        try:
-                            if selector.startswith("//"):
-                                search_input = await self.playwright_page.wait_for_selector(
-                                    selector, timeout=10000, state="visible"
-                                )
-                            else:
-                                search_input = await self.playwright_page.query_selector(selector)
-                            if search_input:
-                                break
-                        except Exception:
-                            continue
+                    utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 获取初始化数据: {initial_data}")
                     
-                    if search_input:
-                        # 模拟真实用户输入行为
-                        await search_input.click()
-                        await asyncio.sleep(random.uniform(0.5, 1))
-                        
-                        # 逐字输入关键词
-                        for char in keyword:
-                            await search_input.type(char, delay=random.uniform(100, 300))
-                            await asyncio.sleep(random.uniform(0.1, 0.3))
-                        
-                        await asyncio.sleep(random.uniform(0.5, 1))
-                        await search_input.press("Enter")
-                        
-                        # 等待搜索结果加载
-                        await self.playwright_page.wait_for_load_state("networkidle")
-                        await asyncio.sleep(random.uniform(2, 4))
-                        
-                        # 模拟滚动
-                        for _ in range(random.randint(2, 4)):
-                            await self.playwright_page.evaluate("window.scrollBy(0, Math.floor(Math.random() * 300) + 100)")
-                            await asyncio.sleep(random.uniform(0.5, 1.5))
-                        
-                        # 更新cookie和localStorage
-                        await self.update_cookies(self.playwright_page.context)
-                        
+                    # 直接访问搜索结果页
+                    encoded_keyword = urllib.parse.quote(keyword)
+                    search_url = f"https://www.xiaohongshu.com/search_result?keyword={encoded_keyword}&source=web_search&sort=general"
+                    
+                    await self.playwright_page.goto(
+                        search_url,
+                        wait_until="networkidle",
+                        timeout=30000
+                    )
+                    await asyncio.sleep(random.uniform(2, 4))
+                    
+                    # 模拟滚动
+                    for _ in range(random.randint(2, 4)):
+                        await self.playwright_page.evaluate("""
+                            () => {
+                                const scrollHeight = Math.floor(Math.random() * 300) + 100;
+                                window.scrollBy({
+                                    top: scrollHeight,
+                                    behavior: 'smooth'
+                                });
+                            }
+                        """)
+                        await asyncio.sleep(random.uniform(0.5, 1.5))
+                    
+                    # 获取搜索页面的关键数据
+                    search_data = await self.playwright_page.evaluate("""
+                        () => {
+                            const data = {};
+                            data.searchData = window.__INITIAL_STATE__ || {};
+                            data.sign = window._XSDATA || {};
+                            return data;
+                        }
+                    """)
+                    
+                    utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 获取搜索页面数据: {search_data}")
+                    
+                    # 更新cookie和localStorage
+                    await self.update_cookies(self.playwright_page.context)
+                    
                 except Exception as e:
                     utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 预热阶段出错: {str(e)}")
                 
@@ -467,10 +477,12 @@ class XiaoHongShuClient(AbstractApiClient):
                     local_storage = await self.playwright_page.evaluate("() => window.localStorage")
                     web_session = local_storage.get("web_session", "")
                     device_id = local_storage.get("deviceId", str(random.randint(100000, 999999)))
+                    web_id = local_storage.get("webId", "")
                 except Exception as e:
                     utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 获取localStorage失败: {str(e)}")
                     web_session = ""
                     device_id = str(random.randint(100000, 999999))
+                    web_id = ""
                 
                 current_timestamp = int(time.time() * 1000)
                 data = {
@@ -478,14 +490,15 @@ class XiaoHongShuClient(AbstractApiClient):
                     "page": page,
                     "page_size": page_size,
                     "search_id": search_id,
-                    "sort": sort.value,
-                    "note_type": note_type.value,
+                    "sort": "general",  # 使用默认排序
+                    "note_type": "0",   # 使用字符串类型
                     "image_formats": ["jpg", "webp", "avif"],
                     "device_fingerprint": str(current_timestamp),
                     "source": "web_search",
-                    "search_type": "1",  # 添加搜索类型
+                    "search_type": "1",
+                    "cursor": str((page - 1) * page_size),  # 添加cursor参数
                     "api_extra_params": {
-                        "aaid": "",
+                        "aaid": web_id,
                         "did": device_id,
                         "device_id": device_id,
                         "device_fingerprint": str(current_timestamp),
@@ -493,7 +506,8 @@ class XiaoHongShuClient(AbstractApiClient):
                         "sid": web_session or str(random.randint(1000000, 9999999)),
                         "t": str(int(current_timestamp / 1000)),
                         "platform": "web",
-                        "build_version": "2.20.0",  # 添加版本号
+                        "build_version": "2.20.0",
+                        "web_id": web_id
                     }
                 }
                 
@@ -504,14 +518,15 @@ class XiaoHongShuClient(AbstractApiClient):
                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                     "Content-Type": "application/json;charset=UTF-8",
                     "Origin": "https://www.xiaohongshu.com",
-                    "Referer": f"https://www.xiaohongshu.com/search_result?keyword={keyword}",
+                    "Referer": f"https://www.xiaohongshu.com/search_result?keyword={urllib.parse.quote(keyword)}",
                     "X-B3-TraceId": f"{random.randint(100000, 999999)}",
                     "X-S": "",
                     "X-T": str(int(current_timestamp / 1000)),
                     "X-Bd-Traceid": str(random.randint(100000, 999999)),
                     "X-Bd-Traceparent": f"00-{random.randint(100000, 999999)}-{random.randint(100000, 999999)}-01",
-                    "X-Sign": "",  # 这个值会在_pre_headers中被更新
+                    "X-Sign": "",
                     "X-Sign-Version": "1.0",
+                    "X-Xsrf-Token": self.cookie_dict.get("xsrf_token", ""),  # 添加XSRF Token
                 })
                 
                 # 4. 发起搜索请求
