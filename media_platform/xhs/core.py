@@ -289,7 +289,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
-                            time.sleep(1000)
                     page += 1
                     utils.logger.info(
                         f"[XiaoHongShuCrawler.search] Note details: {note_details}"
@@ -656,7 +655,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 name=note_id,
             )
             task_list.append(task)
-            time.sleep(3000)
         await asyncio.gather(*task_list)
 
     async def batch_update_xhs_note_comments_and_store_user(self, note_id: str, comments: List[Dict]):
