@@ -521,23 +521,18 @@ class XiaoHongShuCrawler(AbstractCrawler):
             # 获取完整作者信息
             try:
                 creator_info = await self.xhs_client.get_creator_info(user_id=user_id)
-                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功获取作者完整信息: {creator_info}")
+                utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功获取作者完整信息: {creator_info}")
                 
                 await xhs_store.save_creator(user_id, creator=creator_info)
-                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功保存作者信息: {user_id}")
+                utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功保存作者信息: {user_id}")
             
             except Exception as e:
-                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 获取作者完整信息失败: {str(e)}")
+                utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 获取作者完整信息失败: {str(e)}")
                 # 打印更详细的错误信息
                 import traceback
-                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 错误详情: {traceback.format_exc()}")
+                utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 错误详情: {traceback.format_exc()}")
              
              
-                            
-
-            
-        
-
     async def get_specified_notes(self):
         """
         Get the information and comments of the specified post
@@ -661,7 +656,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
             task_list.append(task)
         await asyncio.gather(*task_list)
 
-    async def batch_update_xhs_note_comments_and_store_user(note_id: str, comments: List[Dict]):
+    async def batch_update_xhs_note_comments_and_store_user(self, note_id: str, comments: List[Dict]):
         """
         批量更新小红书笔记评论和保存用户
         Args:
@@ -676,7 +671,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         # 批量更新
         xhs_store.batch_update_xhs_note_comments(note_id, comments)
         for comment_item in comments:
-            await get_and_store_user(comment_item.get("user_id"))
+            await self.get_and_store_user(comment_item.get("user_id"))
 
 
     async def get_comments(
@@ -696,8 +691,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_id=note_id,
                 xsec_token=xsec_token,
                 crawl_interval=crawl_interval,
-                callback=batch_update_xhs_note_comments_and_store_user,
-                max_count=CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                callback=self.batch_update_xhs_note_comments_and_store_user,
+                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
 
     @staticmethod
