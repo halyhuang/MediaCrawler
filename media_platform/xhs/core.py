@@ -284,6 +284,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     for note_detail in note_details:
                         if note_detail:
                             await xhs_store.update_xhs_note(note_detail)
+                            await self.get_and_store_user(note_detail.get("user_id"))
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
@@ -512,6 +513,30 @@ class XiaoHongShuCrawler(AbstractCrawler):
         utils.logger.info(
             f"[XiaoHongShuCrawler.get_creators_and_notes] End get xiaohongshu creators, total: {len(processed_creators)}"
         )
+    
+        async def get_and_store_user(self, user_id: str):
+            """
+            保存用户信息
+            """
+            # 获取完整作者信息
+            try:
+                creator_info = await self.xhs_client.get_creator_info(user_id=user_id)
+                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功获取作者完整信息: {creator_info}")
+                
+                await xhs_store.save_creator(user_id, creator=creator_info)
+                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] 成功保存作者信息: {user_id}")
+            
+            except Exception as e:
+                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 获取作者完整信息失败: {str(e)}")
+                # 打印更详细的错误信息
+                import traceback
+                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] 错误详情: {traceback.format_exc()}")
+             
+             
+                            
+
+            
+        
 
     async def get_specified_notes(self):
         """
@@ -636,6 +661,24 @@ class XiaoHongShuCrawler(AbstractCrawler):
             task_list.append(task)
         await asyncio.gather(*task_list)
 
+    async def batch_update_xhs_note_comments_and_store_user(note_id: str, comments: List[Dict]):
+        """
+        批量更新小红书笔记评论和保存用户
+        Args:
+            note_id:
+            comments:
+
+        Returns:
+
+        """
+        if not comments:
+            return
+        # 批量更新
+        xhs_store.batch_update_xhs_note_comments(note_id, comments)
+        for comment_item in comments:
+            await get_and_store_user(comment_item.get("user_id"))
+
+
     async def get_comments(
         self, note_id: str, xsec_token: str, semaphore: asyncio.Semaphore
     ):
@@ -653,7 +696,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 note_id=note_id,
                 xsec_token=xsec_token,
                 crawl_interval=crawl_interval,
-                callback=xhs_store.batch_update_xhs_note_comments,
+                callback=batch_update_xhs_note_comments_and_store_user,
                 max_count=CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
 
