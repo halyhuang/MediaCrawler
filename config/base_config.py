@@ -67,7 +67,7 @@ USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
 START_PAGE = 1
 
 # 爬取视频/帖子的数量控制
-CRAWLER_MAX_NOTES_COUNT = 50  # 减少数量避免被限制
+CRAWLER_MAX_NOTES_COUNT = 10  # 减少数量避免被限制
 
 # 并发爬虫数量控制
 MAX_CONCURRENCY_NUM = 1
