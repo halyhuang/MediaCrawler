@@ -399,52 +399,111 @@ class XiaoHongShuClient(AbstractApiClient):
         Returns:
 
         """
-        # 先访问搜索页面
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # 1. 预热阶段
+                await self._warm_up_search(keyword)
+                
+                # 2. 构建搜索参数
+                uri = "/api/sns/web/v1/search/notes"
+                data = {
+                    "keyword": keyword,
+                    "page": page,
+                    "page_size": page_size,
+                    "search_id": search_id,
+                    "sort": sort.value,
+                    "note_type": note_type.value,
+                    "image_formats": ["jpg", "webp", "avif"]
+                }
+                
+                # 3. 发起搜索请求
+                utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
+                response = await self.post(uri, data)
+                utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
+                
+                # 4. 处理响应
+                if not response:
+                    utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] Empty response")
+                    retry_count += 1
+                    await self._handle_empty_response()
+                    continue
+                    
+                if isinstance(response, dict):
+                    if not response.get("items"):
+                        utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] No items found in response")
+                        if retry_count < max_retries - 1:
+                            retry_count += 1
+                            await self._handle_empty_response()
+                            continue
+                    else:
+                        return response
+                        
+                return response
+                
+            except IPBlockError as e:
+                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] IP blocked: {str(e)}")
+                raise
+            except DataFetchError as e:
+                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Data fetch error: {str(e)}")
+                retry_count += 1
+                await asyncio.sleep(random.uniform(5, 10))
+                continue
+            except Exception as e:
+                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Unexpected error: {str(e)}")
+                retry_count += 1
+                await asyncio.sleep(random.uniform(5, 10))
+                continue
+                
+        return {"has_more": False, "items": []}
+
+    async def _warm_up_search(self, keyword: str):
+        """预热搜索请求"""
         try:
+            # 1. 访问首页
+            await self.playwright_page.goto("https://www.xiaohongshu.com")
+            await asyncio.sleep(random.uniform(3, 5))
+            
+            # 2. 模拟滚动
+            for _ in range(random.randint(2, 4)):
+                await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await asyncio.sleep(random.uniform(1, 2))
+            
+            # 3. 访问搜索页面
             search_url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}"
             await self.playwright_page.goto(search_url)
             await asyncio.sleep(random.uniform(2, 4))
             
-            # 模拟滚动
+            # 4. 模拟搜索页面滚动
             for _ in range(random.randint(1, 3)):
                 await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
                 await asyncio.sleep(random.uniform(1, 2))
-        except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Failed to visit search page: {str(e)}")
-
-        uri = "/api/sns/web/v1/search/notes"
-        data = {
-            "keyword": keyword,
-            "page": page,
-            "page_size": page_size,
-            "search_id": search_id,
-            "sort": sort.value,
-            "note_type": note_type.value,
-            "image_formats": ["jpg", "webp", "avif"]
-        }
-        utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
-        try:
-            response = await self.post(uri, data)
-            utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
-            
-            # 检查响应内容
-            if not response or (isinstance(response, dict) and not response.get("items")):
-                utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] Empty response or no items found")
-                # 尝试重新获取cookie
-                await self.update_cookies(self.playwright_page.context)
-                # 重试请求
-                response = await self.post(uri, data)
                 
-            return response
-        except IPBlockError as e:
-            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] IP blocked: {str(e)}")
-            raise
-        except DataFetchError as e:
-            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Data fetch error: {str(e)}")
-            raise
+            # 5. 更新cookie
+            await self.update_cookies(self.playwright_page.context)
+            
         except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Unexpected error: {str(e)}")
-            raise
+            utils.logger.error(f"[XiaoHongShuClient._warm_up_search] Failed to warm up: {str(e)}")
+            
+    async def _handle_empty_response(self):
+        """处理空响应"""
+        try:
+            # 1. 更新cookie
+            await self.update_cookies(self.playwright_page.context)
+            
+            # 2. 更换User-Agent
+            await self._rotate_user_agent()
+            
+            # 3. 随机延迟
+            await asyncio.sleep(random.uniform(5, 10))
+            
+            # 4. 模拟随机行为
+            await self.simulate_user_behavior()
+            
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient._handle_empty_response] Error: {str(e)}")
 
     async def get_note_by_id(
         self, note_id: str, xsec_source: str, xsec_token: str
