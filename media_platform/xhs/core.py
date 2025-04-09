@@ -468,7 +468,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             # 创建简化的笔记信息
                             simplified_note = {
                                 "title": note_info["title"],
-                                "desc": note_info["desc"]}
+                                "desc": note_info["desc"],
+                                "note_id": note_info["note_id"]}
                             
                             # 更新笔记列表
                             if user_id in processed_creators:
