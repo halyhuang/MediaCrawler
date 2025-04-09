@@ -285,7 +285,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             user = note_detail.get("user", {})
                             user_id = user.get("user_id")
                             await xhs_store.update_xhs_note(note_detail)
-                            await self.get_and_store_user(note_detail.get(user_id))
+                            await self.get_and_store_user(user_id)
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
@@ -515,24 +515,24 @@ class XiaoHongShuCrawler(AbstractCrawler):
             f"[XiaoHongShuCrawler.get_creators_and_notes] End get xiaohongshu creators, total: {len(processed_creators)}"
         )
     
-        async def get_and_store_user(self, user_id: str):
-            """
-            保存用户信息
-            """
-            # 获取完整作者信息
-            try:
-                creator_info = await self.xhs_client.get_creator_info(user_id=user_id)
-                utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功获取作者完整信息: {creator_info}")
-                
-                await xhs_store.save_creator(user_id, creator=creator_info)
-                utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功保存作者信息: {user_id}")
+    async def get_and_store_user(self, user_id: str):
+        """
+        保存用户信息
+        """
+        # 获取完整作者信息
+        try:
+            creator_info = await self.xhs_client.get_creator_info(user_id=user_id)
+            utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功获取作者完整信息: {creator_info}")
             
-            except Exception as e:
-                utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 获取作者完整信息失败: {str(e)}")
-                # 打印更详细的错误信息
-                import traceback
-                utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 错误详情: {traceback.format_exc()}")
-             
+            await xhs_store.save_creator(user_id, creator=creator_info)
+            utils.logger.info(f"[XiaoHongShuCrawler.get_and_store_user] 成功保存作者信息: {user_id}")
+        
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 获取作者完整信息失败: {str(e)}")
+            # 打印更详细的错误信息
+            import traceback
+            utils.logger.error(f"[XiaoHongShuCrawler.get_and_store_user] 错误详情: {traceback.format_exc()}")
+            
              
     async def get_specified_notes(self):
         """
