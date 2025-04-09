@@ -389,23 +389,40 @@ class XiaoHongShuClient(AbstractApiClient):
     ) -> Dict:
         """
         根据关键词搜索笔记
-        Args:
-            keyword: 关键词参数
-            page: 分页第几页
-            page_size: 分页数据长度
-            sort: 搜索结果排序指定
-            note_type: 搜索的笔记类型
-
-        Returns:
-
         """
         max_retries = 3
         retry_count = 0
         
         while retry_count < max_retries:
             try:
-                # 1. 预热阶段
-                await self._warm_up_search(keyword)
+                # 1. 预热阶段 - 模拟真实用户搜索行为
+                try:
+                    # 访问首页
+                    await self.playwright_page.goto("https://www.xiaohongshu.com")
+                    await asyncio.sleep(random.uniform(2, 4))
+                    
+                    # 点击搜索框
+                    search_input = await self.playwright_page.wait_for_selector("input[type='search']", timeout=5000)
+                    if search_input:
+                        await search_input.click()
+                        await asyncio.sleep(random.uniform(1, 2))
+                        
+                        # 输入搜索关键词
+                        await search_input.fill(keyword)
+                        await asyncio.sleep(random.uniform(1, 2))
+                        
+                        # 模拟回车搜索
+                        await search_input.press("Enter")
+                        await asyncio.sleep(random.uniform(2, 4))
+                        
+                        # 等待搜索结果加载
+                        await self.playwright_page.wait_for_load_state("networkidle")
+                        
+                        # 更新cookie
+                        await self.update_cookies(self.playwright_page.context)
+                        
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 预热阶段出错: {str(e)}")
                 
                 # 2. 构建搜索参数
                 uri = "/api/sns/web/v1/search/notes"
@@ -416,15 +433,45 @@ class XiaoHongShuClient(AbstractApiClient):
                     "search_id": search_id,
                     "sort": sort.value,
                     "note_type": note_type.value,
-                    "image_formats": ["jpg", "webp", "avif"]
+                    "image_formats": ["jpg", "webp", "avif"],
+                    "device_fingerprint": str(int(time.time() * 1000)),  # 添加设备指纹
+                    "source": "web_search",  # 指定搜索来源
+                    "api_extra_params": {  # 添加额外参数
+                        "aaid": "",
+                        "did": str(random.randint(10000, 99999)),
+                        "device_id": str(random.randint(100000, 999999)),
+                        "device_fingerprint": str(int(time.time() * 1000)),
+                        "channel": "web",
+                        "sid": str(random.randint(1000000, 9999999)),
+                        "t": str(int(time.time())),
+                        "platform": "web"
+                    }
                 }
                 
-                # 3. 发起搜索请求
+                # 3. 准备请求头
+                headers = self.headers.copy()
+                headers.update({
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Content-Type": "application/json;charset=UTF-8",
+                    "Origin": "https://www.xiaohongshu.com",
+                    "Referer": f"https://www.xiaohongshu.com/search_result?keyword={keyword}",
+                    "X-B3-TraceId": f"{random.randint(100000, 999999)}",
+                    "X-S": "",  # 这个值会在_pre_headers中被更新
+                    "X-T": str(int(time.time())),
+                })
+                
+                # 4. 发起搜索请求
                 utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
+                
+                # 获取签名头
+                signed_headers = await self._pre_headers(uri, data)
+                headers.update(signed_headers)
+                
                 response = await self.post(uri, data)
                 utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
                 
-                # 4. 处理响应
+                # 5. 处理响应
                 if not response:
                     utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] Empty response")
                     retry_count += 1
@@ -432,61 +479,34 @@ class XiaoHongShuClient(AbstractApiClient):
                     continue
                     
                 if isinstance(response, dict):
-                    if not response.get("items"):
+                    items = response.get("items", [])
+                    if not items:
                         utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] No items found in response")
                         if retry_count < max_retries - 1:
                             retry_count += 1
                             await self._handle_empty_response()
                             continue
                     else:
+                        # 处理搜索结果
+                        for item in items:
+                            if "model_type" in item and item["model_type"] in ("rec_query", "hot_query"):
+                                continue
+                            # 补充必要的字段
+                            item["search_id"] = search_id
+                            item["keyword"] = keyword
+                            
                         return response
                         
                 return response
                 
-            except IPBlockError as e:
-                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] IP blocked: {str(e)}")
-                raise
-            except DataFetchError as e:
-                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Data fetch error: {str(e)}")
-                retry_count += 1
-                await asyncio.sleep(random.uniform(5, 10))
-                continue
             except Exception as e:
-                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Unexpected error: {str(e)}")
+                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Error: {str(e)}")
                 retry_count += 1
                 await asyncio.sleep(random.uniform(5, 10))
                 continue
                 
         return {"has_more": False, "items": []}
 
-    async def _warm_up_search(self, keyword: str):
-        """预热搜索请求"""
-        try:
-            # 1. 访问首页
-            await self.playwright_page.goto("https://www.xiaohongshu.com")
-            await asyncio.sleep(random.uniform(3, 5))
-            
-            # 2. 模拟滚动
-            for _ in range(random.randint(2, 4)):
-                await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
-                await asyncio.sleep(random.uniform(1, 2))
-            
-            # 3. 访问搜索页面
-            search_url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}"
-            await self.playwright_page.goto(search_url)
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            # 4. 模拟搜索页面滚动
-            for _ in range(random.randint(1, 3)):
-                await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
-                await asyncio.sleep(random.uniform(1, 2))
-                
-            # 5. 更新cookie
-            await self.update_cookies(self.playwright_page.context)
-            
-        except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient._warm_up_search] Failed to warm up: {str(e)}")
-            
     async def _handle_empty_response(self):
         """处理空响应"""
         try:
@@ -501,6 +521,14 @@ class XiaoHongShuClient(AbstractApiClient):
             
             # 4. 模拟随机行为
             await self.simulate_user_behavior()
+            
+            # 5. 清除浏览器缓存和cookie（可选）
+            try:
+                await self.playwright_page.context.clear_cookies()
+                await self.playwright_page.evaluate("() => localStorage.clear()")
+                await self.playwright_page.evaluate("() => sessionStorage.clear()")
+            except Exception as e:
+                utils.logger.warning(f"[XiaoHongShuClient._handle_empty_response] Failed to clear browser data: {str(e)}")
             
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient._handle_empty_response] Error: {str(e)}")
