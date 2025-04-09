@@ -318,6 +318,12 @@ class XiaoHongShuClient(AbstractApiClient):
                 else:
                     error_msg = data.get("msg", "Unknown error")
                     utils.logger.error(f"[XiaoHongShuClient.request] API error: {error_msg}")
+                    # 如果是权限错误，尝试重新登录
+                    if "没有权限" in error_msg:
+                        utils.logger.warning("[XiaoHongShuClient.request] 账号权限不足，尝试重新登录")
+                        await self._handle_permission_error()
+                        retry_count += 1
+                        continue
                     raise DataFetchError(error_msg)
                     
             except httpx.RequestError as e:
@@ -1043,3 +1049,34 @@ class XiaoHongShuClient(AbstractApiClient):
             return get_note_dict(html)
         except:
             return None
+
+    async def _handle_permission_error(self):
+        """处理权限错误"""
+        try:
+            # 1. 清除所有cookie和缓存
+            await self.playwright_page.context.clear_cookies()
+            await self.playwright_page.evaluate("() => localStorage.clear()")
+            await self.playwright_page.evaluate("() => sessionStorage.clear()")
+            
+            # 2. 重新访问首页
+            await self.playwright_page.goto("https://www.xiaohongshu.com")
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # 3. 等待登录按钮出现并点击
+            try:
+                login_button = await self.playwright_page.wait_for_selector("text=登录", timeout=10000)
+                if login_button:
+                    await login_button.click()
+                    utils.logger.info("[XiaoHongShuClient._handle_permission_error] 已点击登录按钮")
+            except Exception as e:
+                utils.logger.warning(f"[XiaoHongShuClient._handle_permission_error] 未找到登录按钮: {str(e)}")
+            
+            # 4. 等待用户手动登录
+            utils.logger.info("[XiaoHongShuClient._handle_permission_error] 请手动登录...")
+            await asyncio.sleep(30)  # 等待30秒让用户登录
+            
+            # 5. 更新cookie
+            await self.update_cookies(self.playwright_page.context)
+            
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient._handle_permission_error] Error: {str(e)}")
