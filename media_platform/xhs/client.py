@@ -105,8 +105,69 @@ class XiaoHongShuClient(AbstractApiClient):
         retry_count = 0
         while retry_count < max_retries:
             try:
-                async with httpx.AsyncClient(proxies=self.proxies) as client:
+                async with httpx.AsyncClient(proxies=self.proxies, follow_redirects=False) as client:
                     response = await client.request(method, url, timeout=self.timeout, **kwargs)
+
+                # 处理302重定向到验证码页面的情况
+                if response.status_code == 302:
+                    redirect_url = response.headers.get("Location", "")
+                    if "captcha" in redirect_url:
+                        # 解析验证码信息
+                        verify_type = ""
+                        verify_uuid = ""
+                        try:
+                            from urllib.parse import urlparse, parse_qs
+                            parsed_url = urlparse(redirect_url)
+                            query_params = parse_qs(parsed_url.query)
+                            verify_type = query_params.get("verifyType", [""])[0]
+                            verify_uuid = query_params.get("verifyUuid", [""])[0]
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuClient.request] 解析验证码URL失败: {str(e)}")
+                        
+                        utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码重定向，请手动处理。Verifytype: {verify_type}, Verifyuuid: {verify_uuid}")
+                        
+                        # 检查是否在无头模式下运行
+                        if config.HEADLESS:
+                            utils.logger.error("[XiaoHongShuClient.request] 在无头模式下无法处理验证码，请切换到有界面模式")
+                            raise DataFetchError("在无头模式下无法处理验证码")
+                        
+                        # 使用Playwright打开验证码页面
+                        try:
+                            await self.playwright_page.goto(redirect_url)
+                            utils.logger.info(f"[XiaoHongShuClient.request] 已打开验证码页面: {redirect_url}")
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuClient.request] 打开验证码页面失败: {str(e)}")
+                        
+                        # 等待用户手动处理验证码
+                        max_wait_time = 60  # 最长等待60秒
+                        wait_interval = 5   # 每5秒检查一次
+                        for _ in range(max_wait_time // wait_interval):
+                            # 检查验证码是否已处理
+                            try:
+                                # 检查是否已重定向到其他页面（非验证码页面）
+                                current_url = self.playwright_page.url
+                                if "captcha" not in current_url:
+                                    utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功，已重定向到其他页面")
+                                    # 重新尝试原始请求
+                                    return await self.request(method, url, return_response, max_retries, **kwargs)
+                                
+                                # 或者尝试检查登录状态
+                                check_response = await self.request(
+                                    method="GET",
+                                    url="https://edith.xiaohongshu.com/api/sns/web/v1/user/me",
+                                    return_response=True
+                                )
+                                if check_response.status_code == 200:
+                                    utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功")
+                                    return await self.request(method, url, return_response, max_retries, **kwargs)
+                            except Exception:
+                                pass
+                            
+                            await asyncio.sleep(wait_interval)
+                            utils.logger.info(f"[XiaoHongShuClient.request] 等待验证码处理中... 剩余时间: {max_wait_time - (_ * wait_interval)}秒")
+                        
+                        utils.logger.error("[XiaoHongShuClient.request] 验证码处理超时")
+                        raise DataFetchError("验证码处理超时")
 
                 if response.status_code == 471 or response.status_code == 461:
                     # 遇到验证码，等待用户手动处理
