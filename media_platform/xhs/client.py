@@ -168,7 +168,12 @@ class XiaoHongShuClient(AbstractApiClient):
                 }
             """)
             
-            utils.logger.info(f"[XiaoHongShuClient._pre_headers] 获取签名数据: {sign_data}")
+            if not sign_data.get("xs"):
+                utils.logger.warning("[XiaoHongShuClient._pre_headers] 未获取到签名数据，尝试重新获取")
+                # 尝试重新获取签名数据
+                await self.playwright_page.reload(wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(2)
+                sign_data = await self.playwright_page.evaluate("() => window._XSDATA || {}")
             
             # 使用页面中的签名数据
             headers = {
@@ -406,8 +411,8 @@ class XiaoHongShuClient(AbstractApiClient):
                     # 访问首页并等待加载完成
                     await self.playwright_page.goto(
                         "https://www.xiaohongshu.com",
-                        wait_until="domcontentloaded",  # 改为等待DOM加载完成
-                        timeout=60000  # 增加超时时间到60秒
+                        wait_until="domcontentloaded",
+                        timeout=60000
                     )
                     
                     # 等待页面基本元素加载
@@ -423,24 +428,41 @@ class XiaoHongShuClient(AbstractApiClient):
                     initial_data = await self.playwright_page.evaluate("""
                         () => {
                             const data = {};
-                            data.webId = window.localStorage.getItem('webId') || '';
-                            data.websiteConfig = window._globalConfig || {};
-                            data.extraHeaders = window.__INITIAL_STATE__ || {};
+                            try {
+                                data.webId = window.localStorage.getItem('webId') || '';
+                                data.websiteConfig = window._globalConfig || {};
+                                data.extraHeaders = window.__INITIAL_STATE__ || {};
+                                data.xsData = window._XSDATA || {};
+                            } catch (e) {
+                                console.error('获取初始化数据失败:', e);
+                            }
                             return data;
                         }
                     """)
                     
-                    utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 获取初始化数据: {initial_data}")
+                    if not initial_data.get("xsData"):
+                        utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] 未获取到签名数据，尝试重新加载页面")
+                        await self.playwright_page.reload(wait_until="domcontentloaded", timeout=60000)
+                        await asyncio.sleep(random.uniform(2, 4))
+                        initial_data = await self.playwright_page.evaluate("() => window._XSDATA || {}")
                     
                     # 直接访问搜索结果页
                     encoded_keyword = urllib.parse.quote(keyword)
                     search_url = f"https://www.xiaohongshu.com/search_result?keyword={encoded_keyword}&source=web_search&sort=general"
                     
+                    # 使用更宽松的加载策略
                     await self.playwright_page.goto(
                         search_url,
-                        wait_until="networkidle",
-                        timeout=30000
+                        wait_until="domcontentloaded",
+                        timeout=60000
                     )
+                    
+                    # 等待搜索结果加载
+                    try:
+                        await self.playwright_page.wait_for_selector(".search-result-container", timeout=10000)
+                    except Exception as e:
+                        utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 等待搜索结果超时: {str(e)}")
+                    
                     await asyncio.sleep(random.uniform(2, 4))
                     
                     # 模拟滚动
@@ -460,13 +482,16 @@ class XiaoHongShuClient(AbstractApiClient):
                     search_data = await self.playwright_page.evaluate("""
                         () => {
                             const data = {};
-                            data.searchData = window.__INITIAL_STATE__ || {};
-                            data.sign = window._XSDATA || {};
+                            try {
+                                data.searchData = window.__INITIAL_STATE__ || {};
+                                data.sign = window._XSDATA || {};
+                                data.cookies = document.cookie;
+                            } catch (e) {
+                                console.error('获取搜索数据失败:', e);
+                            }
                             return data;
                         }
                     """)
-                    
-                    utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 获取搜索页面数据: {search_data}")
                     
                     # 更新cookie和localStorage
                     await self.update_cookies(self.playwright_page.context)
@@ -495,13 +520,13 @@ class XiaoHongShuClient(AbstractApiClient):
                     "page": page,
                     "page_size": page_size,
                     "search_id": search_id,
-                    "sort": "general",  # 使用默认排序
-                    "note_type": "0",   # 使用字符串类型
+                    "sort": "general",
+                    "note_type": "0",
                     "image_formats": ["jpg", "webp", "avif"],
                     "device_fingerprint": str(current_timestamp),
                     "source": "web_search",
                     "search_type": "1",
-                    "cursor": str((page - 1) * page_size),  # 添加cursor参数
+                    "cursor": str((page - 1) * page_size),
                     "api_extra_params": {
                         "aaid": web_id,
                         "did": device_id,
@@ -531,22 +556,21 @@ class XiaoHongShuClient(AbstractApiClient):
                     "X-Bd-Traceparent": f"00-{random.randint(100000, 999999)}-{random.randint(100000, 999999)}-01",
                     "X-Sign": "",
                     "X-Sign-Version": "1.0",
-                    "X-Xsrf-Token": self.cookie_dict.get("xsrf_token", ""),  # 添加XSRF Token
+                    "X-Xsrf-Token": self.cookie_dict.get("xsrf_token", ""),
                 })
                 
                 # 4. 发起搜索请求
-                utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
+                utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 开始搜索关键词: {keyword}, 页码: {page}")
                 
                 # 获取签名头
                 signed_headers = await self._pre_headers(uri, data)
                 headers.update(signed_headers)
                 
                 response = await self.post(uri, data)
-                utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
                 
                 # 5. 处理响应
                 if not response:
-                    utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] Empty response")
+                    utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] 搜索响应为空")
                     retry_count += 1
                     await self._handle_empty_response()
                     continue
@@ -554,12 +578,13 @@ class XiaoHongShuClient(AbstractApiClient):
                 if isinstance(response, dict):
                     items = response.get("items", [])
                     if not items:
-                        utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] No items found in response")
+                        utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 未找到搜索结果，响应: {response}")
                         if retry_count < max_retries - 1:
                             retry_count += 1
                             await self._handle_empty_response()
                             continue
                     else:
+                        utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] 成功获取到 {len(items)} 条搜索结果")
                         # 处理搜索结果
                         for item in items:
                             if "model_type" in item and item["model_type"] in ("rec_query", "hot_query"):
@@ -573,7 +598,7 @@ class XiaoHongShuClient(AbstractApiClient):
                 return response
                 
             except Exception as e:
-                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Error: {str(e)}")
+                utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] 搜索出错: {str(e)}")
                 retry_count += 1
                 await asyncio.sleep(random.uniform(5, 10))
                 continue
