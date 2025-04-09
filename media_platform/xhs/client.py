@@ -406,14 +406,18 @@ class XiaoHongShuClient(AbstractApiClient):
                     # 访问首页并等待加载完成
                     await self.playwright_page.goto(
                         "https://www.xiaohongshu.com",
-                        wait_until="networkidle",
-                        timeout=30000
+                        wait_until="domcontentloaded",  # 改为等待DOM加载完成
+                        timeout=60000  # 增加超时时间到60秒
                     )
-                    await asyncio.sleep(random.uniform(2, 4))
                     
-                    # 确保页面完全加载
-                    await self.playwright_page.wait_for_load_state("domcontentloaded")
-                    await self.playwright_page.wait_for_load_state("networkidle")
+                    # 等待页面基本元素加载
+                    try:
+                        await self.playwright_page.wait_for_selector("body", timeout=10000)
+                    except Exception as e:
+                        utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 等待body元素超时: {str(e)}")
+                    
+                    # 等待一段时间让页面继续加载
+                    await asyncio.sleep(random.uniform(3, 5))
                     
                     # 获取初始化数据
                     initial_data = await self.playwright_page.evaluate("""
