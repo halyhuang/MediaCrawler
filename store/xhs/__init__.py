@@ -78,6 +78,7 @@ async def update_xhs_note(note_item: Dict):
     interact_info = note_item.get("interact_info", {})
     image_list: List[Dict] = note_item.get("image_list", [])
     tag_list: List[Dict] = note_item.get("tag_list", [])
+    user_item = note_item.get("user", {})
 
     for img in image_list:
         if img.get('url_default') != '':
@@ -93,9 +94,9 @@ async def update_xhs_note(note_item: Dict):
         "video_url": video_url, # 帖子视频url
         "time": note_item.get("time"), # 帖子发布时间
         "last_update_time": note_item.get("last_update_time", 0), # 帖子最后更新时间
-        "user_id": note_item.get("user_id"), # 用户id
-        "nickname": note_item.get("nickname"), # 用户昵称
-        "avatar": note_item.get("avatar"), # 用户头像
+        "user_id": user_item.get("user_id"), # 用户id
+        "nickname": user_item.get("nickname"), # 用户昵称
+        "avatar": user_item.get("avatar"), # 用户头像
         "liked_count": interact_info.get("liked_count"), # 点赞数
         "collected_count": interact_info.get("collected_count"), # 收藏数
         "comment_count": interact_info.get("comment_count"), # 评论数

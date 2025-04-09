@@ -282,8 +282,10 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     for note_detail in note_details:
                         if note_detail:
                             utils.logger.info(f"[XiaoHongShuCrawler.search] Search note_detail:{note_detail}")
+                            user = note_detail.get("user", {})
+                            user_id = user.get("user_id")
                             await xhs_store.update_xhs_note(note_detail)
-                            await self.get_and_store_user(note_detail.get("user_id"))
+                            await self.get_and_store_user(note_detail.get(user_id)
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
                             xsec_tokens.append(note_detail.get("xsec_token"))
