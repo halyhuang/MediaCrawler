@@ -64,7 +64,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
         try:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
-                headless=True,
+                headless=config.HEADLESS,  # 使用配置文件中的HEADLESS设置
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--disable-infobars",

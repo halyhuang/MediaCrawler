@@ -114,10 +114,33 @@ class XiaoHongShuClient(AbstractApiClient):
                     verify_uuid = response.headers.get("Verifyuuid", "")
                     utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码，请手动处理。Verifytype: {verify_type}, Verifyuuid: {verify_uuid}")
                     
+                    # 检查是否在无头模式下运行
+                    if config.HEADLESS:
+                        utils.logger.error("[XiaoHongShuClient.request] 在无头模式下无法处理验证码，请切换到有界面模式")
+                        raise DataFetchError("在无头模式下无法处理验证码")
+                    
                     # 等待用户手动处理验证码
-                    await asyncio.sleep(30)  # 等待30秒
-                    retry_count += 1
-                    continue
+                    max_wait_time = 60  # 最长等待60秒
+                    wait_interval = 5   # 每5秒检查一次
+                    for _ in range(max_wait_time // wait_interval):
+                        # 检查验证码是否已处理
+                        try:
+                            check_response = await self.request(
+                                method="GET",
+                                url="https://edith.xiaohongshu.com/api/sns/web/v1/user/me",
+                                return_response=True
+                            )
+                            if check_response.status_code == 200:
+                                utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功")
+                                return await self.request(method, url, return_response, max_retries, **kwargs)
+                        except Exception:
+                            pass
+                        
+                        await asyncio.sleep(wait_interval)
+                        utils.logger.info(f"[XiaoHongShuClient.request] 等待验证码处理中... 剩余时间: {max_wait_time - (_ * wait_interval)}秒")
+                    
+                    utils.logger.error("[XiaoHongShuClient.request] 验证码处理超时")
+                    raise DataFetchError("验证码处理超时")
                 
                 if response.status_code != 200:
                     utils.logger.error(f"[XiaoHongShuClient.request] Request failed with status code: {response.status_code}, response: {response.text}")

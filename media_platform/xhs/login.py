@@ -40,22 +40,48 @@ class XiaoHongShuLogin(AbstractLogin):
         self.cookie_str = cookie_str
 
     @retry(stop=stop_after_attempt(600), wait=wait_fixed(1), retry=retry_if_result(lambda value: value is False))
-    async def check_login_state(self, no_logged_in_session: str) -> bool:
-        """
-            Check if the current login status is successful and return True otherwise return False
-            retry decorator will retry 20 times if the return value is False, and the retry interval is 1 second
-            if max retry times reached, raise RetryError
-        """
-
-        if "请通过验证" in await self.context_page.content():
-            utils.logger.info("[XiaoHongShuLogin.check_login_state] 登录过程中出现验证码，请手动验证")
-
-        current_cookie = await self.browser_context.cookies()
-        _, cookie_dict = utils.convert_cookies(current_cookie)
-        current_web_session = cookie_dict.get("web_session")
-        if current_web_session != no_logged_in_session:
-            return True
-        return False
+    async def check_login_state(self, page):
+        """检查登录状态"""
+        try:
+            # 等待页面加载完成
+            await page.wait_for_load_state("networkidle")
+            
+            # 检查是否存在验证码
+            if await page.query_selector("div[class*='captcha']"):
+                utils.logger.warning("[XiaoHongShuLogin.check_login_state] 检测到验证码，等待用户手动处理")
+                
+                # 检查是否在无头模式下运行
+                if config.HEADLESS:
+                    utils.logger.error("[XiaoHongShuLogin.check_login_state] 在无头模式下无法处理验证码，请切换到有界面模式")
+                    return False
+                
+                # 等待用户手动处理验证码
+                max_wait_time = 60  # 最长等待60秒
+                wait_interval = 5   # 每5秒检查一次
+                for _ in range(max_wait_time // wait_interval):
+                    # 检查验证码是否已处理
+                    if not await page.query_selector("div[class*='captcha']"):
+                        utils.logger.info("[XiaoHongShuLogin.check_login_state] 验证码处理成功")
+                        break
+                    
+                    await asyncio.sleep(wait_interval)
+                    utils.logger.info(f"[XiaoHongShuLogin.check_login_state] 等待验证码处理中... 剩余时间: {max_wait_time - (_ * wait_interval)}秒")
+                
+                if await page.query_selector("div[class*='captcha']"):
+                    utils.logger.error("[XiaoHongShuLogin.check_login_state] 验证码处理超时")
+                    return False
+            
+            # 检查是否登录成功
+            if await page.query_selector("div[class*='user-info']"):
+                utils.logger.info("[XiaoHongShuLogin.check_login_state] 登录成功")
+                return True
+            
+            utils.logger.warning("[XiaoHongShuLogin.check_login_state] 登录失败")
+            return False
+            
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuLogin.check_login_state] 检查登录状态时出错: {str(e)}")
+            return False
 
     async def begin(self):
         """Start login xiaohongshu"""
@@ -146,7 +172,7 @@ class XiaoHongShuLogin(AbstractLogin):
             break
 
         try:
-            await self.check_login_state(no_logged_in_session)
+            await self.check_login_state(self.context_page)
         except RetryError:
             utils.logger.info("[XiaoHongShuLogin.login_by_mobile] Login xiaohongshu failed by mobile login method ...")
             sys.exit()
@@ -211,7 +237,7 @@ class XiaoHongShuLogin(AbstractLogin):
 
         utils.logger.info(f"[XiaoHongShuLogin.login_by_qrcode] waiting for scan code login, remaining time is 120s")
         try:
-            await self.check_login_state(no_logged_in_session)
+            await self.check_login_state(self.context_page)
         except RetryError:
             utils.logger.info("[XiaoHongShuLogin.login_by_qrcode] Login xiaohongshu failed by qrcode login method ...")
             sys.exit()
