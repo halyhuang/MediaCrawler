@@ -52,7 +52,13 @@ class XiaoHongShuClient(AbstractApiClient):
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
-        self.last_request_time = 0
+        self.last_request_time = time.time()
+        self.request_count = 0
+        self.last_reset_time = time.time()
+        self.request_limit = 50  # 每5分钟最多50个请求
+        self.reset_interval = 300  # 5分钟重置一次
+        self.last_user_agent_change = time.time()
+        self.user_agent_change_interval = 60  # 每60秒更换一次UA
         
         # 补充必要的请求头
         self.headers.update({
@@ -67,9 +73,48 @@ class XiaoHongShuClient(AbstractApiClient):
             "Sec-Ch-Ua-Platform": '"Windows"',
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
-            "User-Agent": config.UA
+            "Sec-Fetch-Site": "same-site"
         })
+
+    async def _check_rate_limit(self):
+        """检查请求频率限制"""
+        current_time = time.time()
+        
+        # 重置计数器
+        if current_time - self.last_reset_time >= self.reset_interval:
+            self.request_count = 0
+            self.last_reset_time = current_time
+            
+        # 检查是否超过限制
+        if self.request_count >= self.request_limit:
+            wait_time = self.reset_interval - (current_time - self.last_reset_time)
+            if wait_time > 0:
+                utils.logger.info(f"[XiaoHongShuClient._check_rate_limit] Rate limit reached, waiting for {wait_time:.2f} seconds")
+                await asyncio.sleep(wait_time)
+                self.request_count = 0
+                self.last_reset_time = time.time()
+        
+        self.request_count += 1
+
+    async def _manage_user_agent(self):
+        """管理User-Agent的更换"""
+        current_time = time.time()
+        if current_time - self.last_user_agent_change >= self.user_agent_change_interval:
+            await self._rotate_user_agent()
+            self.last_user_agent_change = current_time
+
+    async def _handle_request_error(self, response, retry_count, max_retries):
+        """处理请求错误"""
+        if response.status_code == 406:
+            utils.logger.warning(f"[XiaoHongShuClient._handle_request_error] 406 error encountered, retry {retry_count}/{max_retries}")
+            # 更新cookie和headers
+            await self.update_cookies(self.playwright_page.context)
+            await self._manage_user_agent()
+            # 增加延迟
+            await asyncio.sleep(random.uniform(10, 15))
+            return True
+            
+        return False
 
     async def _rotate_user_agent(self):
         """随机轮换User-Agent"""
@@ -134,7 +179,6 @@ class XiaoHongShuClient(AbstractApiClient):
         self.headers.update(headers)
         return self.headers
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def request(
         self,
         method: str,
@@ -143,16 +187,26 @@ class XiaoHongShuClient(AbstractApiClient):
         max_retries: int = 3,
         **kwargs,
     ) -> Union[Dict, str]:
-        await self._wait_between_requests()  # 控制请求间隔
-        await self._rotate_user_agent()  # 轮换User-Agent
-        
-        # 随机模拟用户行为
-        if random.random() < 0.2:  # 20%的概率
-            await self.simulate_user_behavior()
+        await self._check_rate_limit()  # 检查频率限制
+        await self._manage_user_agent()  # 管理User-Agent
         
         retry_count = 0
         while retry_count < max_retries:
             try:
+                # 添加随机延迟
+                await asyncio.sleep(random.uniform(2, 5))
+                
+                # 随机添加一些额外的请求头
+                temp_headers = self.headers.copy()
+                if random.random() < 0.3:  # 30%的概率添加额外header
+                    temp_headers.update({
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache",
+                        "Accept-Encoding": "gzip, deflate, br"
+                    })
+                
+                kwargs['headers'] = temp_headers
+                
                 async with httpx.AsyncClient(proxies=self.proxies, follow_redirects=False) as client:
                     response = await client.request(method, url, timeout=self.timeout, **kwargs)
 
@@ -160,102 +214,56 @@ class XiaoHongShuClient(AbstractApiClient):
                 if response.status_code == 302:
                     redirect_url = response.headers.get("Location", "")
                     if "captcha" in redirect_url:
+                        utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码重定向，尝试处理...")
+                        
                         # 解析验证码信息
-                        verify_type = ""
-                        verify_uuid = ""
                         try:
                             from urllib.parse import urlparse, parse_qs
                             parsed_url = urlparse(redirect_url)
                             query_params = parse_qs(parsed_url.query)
                             verify_type = query_params.get("verifyType", [""])[0]
                             verify_uuid = query_params.get("verifyUuid", [""])[0]
-                        except Exception as e:
-                            utils.logger.error(f"[XiaoHongShuClient.request] 解析验证码URL失败: {str(e)}")
-                        
-                        utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码重定向，请手动处理。Verifytype: {verify_type}, Verifyuuid: {verify_uuid}")
-                        
-                        # 检查是否在无头模式下运行
-                        if config.HEADLESS:
-                            utils.logger.error("[XiaoHongShuClient.request] 在无头模式下无法处理验证码，请切换到有界面模式")
-                            raise DataFetchError("在无头模式下无法处理验证码")
-                        
-                        # 使用Playwright打开验证码页面
-                        try:
+                            
+                            # 记录验证码信息
+                            utils.logger.info(f"[XiaoHongShuClient.request] 验证码类型: {verify_type}, UUID: {verify_uuid}")
+                            
+                            # 如果是在无头模式下运行
+                            if config.HEADLESS:
+                                utils.logger.error("[XiaoHongShuClient.request] 在无头模式下无法处理验证码，切换到有界面模式")
+                                raise DataFetchError("在无头模式下无法处理验证码")
+                            
+                            # 使用Playwright打开验证码页面
                             await self.playwright_page.goto(redirect_url)
-                            utils.logger.info(f"[XiaoHongShuClient.request] 已打开验证码页面: {redirect_url}")
-                        except Exception as e:
-                            utils.logger.error(f"[XiaoHongShuClient.request] 打开验证码页面失败: {str(e)}")
-                        
-                        # 等待用户手动处理验证码
-                        max_wait_time = 60  # 最长等待60秒
-                        wait_interval = 5   # 每5秒检查一次
-                        for _ in range(max_wait_time // wait_interval):
-                            # 检查验证码是否已处理
-                            try:
-                                # 检查是否已重定向到其他页面（非验证码页面）
+                            
+                            # 等待用户处理验证码
+                            max_wait_time = 60
+                            check_interval = 5
+                            for _ in range(max_wait_time // check_interval):
                                 current_url = self.playwright_page.url
                                 if "captcha" not in current_url:
-                                    utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功，已重定向到其他页面")
+                                    utils.logger.info("[XiaoHongShuClient.request] 验证码已处理成功")
+                                    # 更新cookie
+                                    await self.update_cookies(self.playwright_page.context)
                                     # 重新尝试原始请求
-                                    return await self.request(method, url, return_response, max_retries, **kwargs)
+                                    continue
                                 
-                                # 或者尝试检查登录状态
-                                check_response = await self.request(
-                                    method="GET",
-                                    url="https://edith.xiaohongshu.com/api/sns/web/v1/user/me",
-                                    return_response=True
-                                )
-                                if check_response.status_code == 200:
-                                    utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功")
-                                    return await self.request(method, url, return_response, max_retries, **kwargs)
-                            except Exception:
-                                pass
+                                await asyncio.sleep(check_interval)
                             
-                            await asyncio.sleep(wait_interval)
-                            utils.logger.info(f"[XiaoHongShuClient.request] 等待验证码处理中... 剩余时间: {max_wait_time - (_ * wait_interval)}秒")
-                        
-                        utils.logger.error("[XiaoHongShuClient.request] 验证码处理超时")
-                        raise DataFetchError("验证码处理超时")
-
-                if response.status_code == 471 or response.status_code == 461:
-                    # 遇到验证码，等待用户手动处理
-                    verify_type = response.headers.get("Verifytype", "")
-                    verify_uuid = response.headers.get("Verifyuuid", "")
-                    utils.logger.warning(f"[XiaoHongShuClient.request] 遇到验证码，请手动处理。Verifytype: {verify_type}, Verifyuuid: {verify_uuid}")
-                    
-                    # 检查是否在无头模式下运行
-                    if config.HEADLESS:
-                        utils.logger.error("[XiaoHongShuClient.request] 在无头模式下无法处理验证码，请切换到有界面模式")
-                        raise DataFetchError("在无头模式下无法处理验证码")
-                    
-                    # 等待用户手动处理验证码
-                    max_wait_time = 60  # 最长等待60秒
-                    wait_interval = 5   # 每5秒检查一次
-                    for _ in range(max_wait_time // wait_interval):
-                        # 检查验证码是否已处理
-                        try:
-                            check_response = await self.request(
-                                method="GET",
-                                url="https://edith.xiaohongshu.com/api/sns/web/v1/user/me",
-                                return_response=True
-                            )
-                            if check_response.status_code == 200:
-                                utils.logger.info("[XiaoHongShuClient.request] 验证码处理成功")
-                                return await self.request(method, url, return_response, max_retries, **kwargs)
-                        except Exception:
-                            pass
-                        
-                        await asyncio.sleep(wait_interval)
-                        utils.logger.info(f"[XiaoHongShuClient.request] 等待验证码处理中... 剩余时间: {max_wait_time - (_ * wait_interval)}秒")
-                    
-                    utils.logger.error("[XiaoHongShuClient.request] 验证码处理超时")
-                    raise DataFetchError("验证码处理超时")
+                            utils.logger.error("[XiaoHongShuClient.request] 验证码处理超时")
+                            raise DataFetchError("验证码处理超时")
+                            
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuClient.request] 处理验证码过程中出错: {str(e)}")
+                            raise
                 
+                # 处理其他错误状态码
                 if response.status_code != 200:
-                    utils.logger.error(f"[XiaoHongShuClient.request] Request failed with status code: {response.status_code}, response: {response.text}")
-                    retry_count += 1
-                    await asyncio.sleep(5)  # 等待5秒后重试
-                    continue
+                    if await self._handle_request_error(response, retry_count, max_retries):
+                        retry_count += 1
+                        continue
+                    else:
+                        utils.logger.error(f"[XiaoHongShuClient.request] Request failed with status code: {response.status_code}, response: {response.text}")
+                        raise DataFetchError(f"Request failed with status code: {response.status_code}")
 
                 if return_response:
                     return response.text
@@ -280,7 +288,7 @@ class XiaoHongShuClient(AbstractApiClient):
             except httpx.RequestError as e:
                 utils.logger.error(f"[XiaoHongShuClient.request] Request error: {str(e)}")
                 retry_count += 1
-                await asyncio.sleep(5)
+                await asyncio.sleep(random.uniform(5, 10))
                 continue
             except Exception as e:
                 utils.logger.error(f"[XiaoHongShuClient.request] Unexpected error: {str(e)}")
