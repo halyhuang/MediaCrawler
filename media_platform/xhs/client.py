@@ -53,6 +53,23 @@ class XiaoHongShuClient(AbstractApiClient):
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
         self.last_request_time = 0
+        
+        # 补充必要的请求头
+        self.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Connection": "keep-alive",
+            "Content-Type": "application/json;charset=UTF-8",
+            "Origin": "https://www.xiaohongshu.com",
+            "Referer": "https://www.xiaohongshu.com/",
+            "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": config.UA
+        })
 
     async def _rotate_user_agent(self):
         """随机轮换User-Agent"""
@@ -374,6 +391,19 @@ class XiaoHongShuClient(AbstractApiClient):
         Returns:
 
         """
+        # 先访问搜索页面
+        try:
+            search_url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}"
+            await self.playwright_page.goto(search_url)
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # 模拟滚动
+            for _ in range(random.randint(1, 3)):
+                await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await asyncio.sleep(random.uniform(1, 2))
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] Failed to visit search page: {str(e)}")
+
         uri = "/api/sns/web/v1/search/notes"
         data = {
             "keyword": keyword,
@@ -382,11 +412,21 @@ class XiaoHongShuClient(AbstractApiClient):
             "search_id": search_id,
             "sort": sort.value,
             "note_type": note_type.value,
+            "image_formats": ["jpg", "webp", "avif"]
         }
         utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Searching with params: {data}")
         try:
             response = await self.post(uri, data)
             utils.logger.info(f"[XiaoHongShuClient.get_note_by_keyword] Search response: {response}")
+            
+            # 检查响应内容
+            if not response or (isinstance(response, dict) and not response.get("items")):
+                utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] Empty response or no items found")
+                # 尝试重新获取cookie
+                await self.update_cookies(self.playwright_page.context)
+                # 重试请求
+                response = await self.post(uri, data)
+                
             return response
         except IPBlockError as e:
             utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] IP blocked: {str(e)}")
