@@ -229,3 +229,32 @@ FOLLOW_WITH_MOUSE_MOVE = True
 
 # 关注操作的超时时间(秒)
 FOLLOW_TIMEOUT = 30
+
+# 爬虫策略配置
+BATCH_SIZE = 5  # 每批次最多爬取页数
+BATCH_INTERVAL = 300  # 批次间隔时间(秒)
+REQUEST_MIN_INTERVAL = 3  # 请求最小间隔时间(秒)
+REQUEST_MAX_INTERVAL = 7  # 请求最大间隔时间(秒)
+RANDOM_PAGE_SIZE_MIN = 15  # 每页最小条数
+RANDOM_PAGE_SIZE_MAX = 20  # 每页最大条数
+
+# 浏览器 User-Agent 列表
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/91.0.864.59 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/92.0.902.73 Safari/537.36"
+]
+
+# 模拟用户行为的随机访问页面
+RANDOM_PAGES = [
+    "https://www.xiaohongshu.com/explore",
+    "https://www.xiaohongshu.com/following",
+    "https://www.xiaohongshu.com/explore/home",
+    "https://www.xiaohongshu.com/explore/selection"
+]
+
+# 代理IP轮换概率 (0-1之间)
+PROXY_ROTATION_PROBABILITY = 0.3

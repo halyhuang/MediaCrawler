@@ -12,6 +12,8 @@
 import asyncio
 import json
 import re
+import random
+import time
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
@@ -50,6 +52,40 @@ class XiaoHongShuClient(AbstractApiClient):
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
+        self.last_request_time = 0
+
+    async def _rotate_user_agent(self):
+        """随机轮换User-Agent"""
+        self.headers["User-Agent"] = random.choice(config.USER_AGENTS)
+        utils.logger.info(f"[XiaoHongShuClient._rotate_user_agent] Rotated User-Agent: {self.headers['User-Agent']}")
+
+    async def simulate_user_behavior(self):
+        """模拟真实用户行为"""
+        try:
+            random_page = random.choice(config.RANDOM_PAGES)
+            utils.logger.info(f"[XiaoHongShuClient.simulate_user_behavior] Visiting random page: {random_page}")
+            await self.playwright_page.goto(random_page)
+            await asyncio.sleep(random.uniform(2, 5))
+            
+            # 模拟滚动
+            for _ in range(random.randint(2, 5)):
+                await self.playwright_page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await asyncio.sleep(random.uniform(1, 3))
+                
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.simulate_user_behavior] Error: {str(e)}")
+
+    async def _wait_between_requests(self):
+        """控制请求间隔"""
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
+        if time_since_last_request < config.REQUEST_MIN_INTERVAL:
+            wait_time = random.uniform(
+                config.REQUEST_MIN_INTERVAL - time_since_last_request,
+                config.REQUEST_MAX_INTERVAL - time_since_last_request
+            )
+            await asyncio.sleep(wait_time)
+        self.last_request_time = time.time()
 
     async def _pre_headers(self, url: str, data=None) -> Dict:
         """
@@ -90,18 +126,13 @@ class XiaoHongShuClient(AbstractApiClient):
         max_retries: int = 3,
         **kwargs,
     ) -> Union[Dict, str]:
-        """
-        发送HTTP请求
-        Args:
-            method: 请求方法
-            url: 请求URL
-            return_response: 是否返回原始响应
-            max_retries: 最大重试次数
-            **kwargs: 其他参数
-
-        Returns:
-
-        """
+        await self._wait_between_requests()  # 控制请求间隔
+        await self._rotate_user_agent()  # 轮换User-Agent
+        
+        # 随机模拟用户行为
+        if random.random() < 0.2:  # 20%的概率
+            await self.simulate_user_behavior()
+        
         retry_count = 0
         while retry_count < max_retries:
             try:
