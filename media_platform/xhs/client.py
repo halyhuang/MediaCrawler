@@ -397,28 +397,63 @@ class XiaoHongShuClient(AbstractApiClient):
             try:
                 # 1. 预热阶段 - 模拟真实用户搜索行为
                 try:
-                    # 访问首页
-                    await self.playwright_page.goto("https://www.xiaohongshu.com")
+                    # 访问首页并等待加载完成
+                    await self.playwright_page.goto(
+                        "https://www.xiaohongshu.com",
+                        wait_until="networkidle",
+                        timeout=30000
+                    )
                     await asyncio.sleep(random.uniform(2, 4))
                     
-                    # 点击搜索框
-                    search_input = await self.playwright_page.wait_for_selector("input[type='search']", timeout=5000)
+                    # 确保页面完全加载
+                    await self.playwright_page.wait_for_load_state("domcontentloaded")
+                    await self.playwright_page.wait_for_load_state("networkidle")
+                    
+                    # 尝试多个可能的搜索框选择器
+                    search_selectors = [
+                        "input[type='search']",
+                        "input[placeholder*='搜索']",
+                        "//input[@type='search']",
+                        "//input[contains(@placeholder, '搜索')]"
+                    ]
+                    
+                    search_input = None
+                    for selector in search_selectors:
+                        try:
+                            if selector.startswith("//"):
+                                search_input = await self.playwright_page.wait_for_selector(
+                                    selector, timeout=10000, state="visible"
+                                )
+                            else:
+                                search_input = await self.playwright_page.query_selector(selector)
+                            if search_input:
+                                break
+                        except Exception:
+                            continue
+                    
                     if search_input:
+                        # 模拟真实用户输入行为
                         await search_input.click()
-                        await asyncio.sleep(random.uniform(1, 2))
+                        await asyncio.sleep(random.uniform(0.5, 1))
                         
-                        # 输入搜索关键词
-                        await search_input.fill(keyword)
-                        await asyncio.sleep(random.uniform(1, 2))
+                        # 逐字输入关键词
+                        for char in keyword:
+                            await search_input.type(char, delay=random.uniform(100, 300))
+                            await asyncio.sleep(random.uniform(0.1, 0.3))
                         
-                        # 模拟回车搜索
+                        await asyncio.sleep(random.uniform(0.5, 1))
                         await search_input.press("Enter")
-                        await asyncio.sleep(random.uniform(2, 4))
                         
                         # 等待搜索结果加载
                         await self.playwright_page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(random.uniform(2, 4))
                         
-                        # 更新cookie
+                        # 模拟滚动
+                        for _ in range(random.randint(2, 4)):
+                            await self.playwright_page.evaluate("window.scrollBy(0, Math.floor(Math.random() * 300) + 100)")
+                            await asyncio.sleep(random.uniform(0.5, 1.5))
+                        
+                        # 更新cookie和localStorage
                         await self.update_cookies(self.playwright_page.context)
                         
                 except Exception as e:
@@ -426,6 +461,18 @@ class XiaoHongShuClient(AbstractApiClient):
                 
                 # 2. 构建搜索参数
                 uri = "/api/sns/web/v1/search/notes"
+                
+                # 获取必要的参数
+                try:
+                    local_storage = await self.playwright_page.evaluate("() => window.localStorage")
+                    web_session = local_storage.get("web_session", "")
+                    device_id = local_storage.get("deviceId", str(random.randint(100000, 999999)))
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 获取localStorage失败: {str(e)}")
+                    web_session = ""
+                    device_id = str(random.randint(100000, 999999))
+                
+                current_timestamp = int(time.time() * 1000)
                 data = {
                     "keyword": keyword,
                     "page": page,
@@ -434,17 +481,19 @@ class XiaoHongShuClient(AbstractApiClient):
                     "sort": sort.value,
                     "note_type": note_type.value,
                     "image_formats": ["jpg", "webp", "avif"],
-                    "device_fingerprint": str(int(time.time() * 1000)),  # 添加设备指纹
-                    "source": "web_search",  # 指定搜索来源
-                    "api_extra_params": {  # 添加额外参数
+                    "device_fingerprint": str(current_timestamp),
+                    "source": "web_search",
+                    "search_type": "1",  # 添加搜索类型
+                    "api_extra_params": {
                         "aaid": "",
-                        "did": str(random.randint(10000, 99999)),
-                        "device_id": str(random.randint(100000, 999999)),
-                        "device_fingerprint": str(int(time.time() * 1000)),
+                        "did": device_id,
+                        "device_id": device_id,
+                        "device_fingerprint": str(current_timestamp),
                         "channel": "web",
-                        "sid": str(random.randint(1000000, 9999999)),
-                        "t": str(int(time.time())),
-                        "platform": "web"
+                        "sid": web_session or str(random.randint(1000000, 9999999)),
+                        "t": str(int(current_timestamp / 1000)),
+                        "platform": "web",
+                        "build_version": "2.20.0",  # 添加版本号
                     }
                 }
                 
@@ -457,8 +506,12 @@ class XiaoHongShuClient(AbstractApiClient):
                     "Origin": "https://www.xiaohongshu.com",
                     "Referer": f"https://www.xiaohongshu.com/search_result?keyword={keyword}",
                     "X-B3-TraceId": f"{random.randint(100000, 999999)}",
-                    "X-S": "",  # 这个值会在_pre_headers中被更新
-                    "X-T": str(int(time.time())),
+                    "X-S": "",
+                    "X-T": str(int(current_timestamp / 1000)),
+                    "X-Bd-Traceid": str(random.randint(100000, 999999)),
+                    "X-Bd-Traceparent": f"00-{random.randint(100000, 999999)}-{random.randint(100000, 999999)}-01",
+                    "X-Sign": "",  # 这个值会在_pre_headers中被更新
+                    "X-Sign-Version": "1.0",
                 })
                 
                 # 4. 发起搜索请求
