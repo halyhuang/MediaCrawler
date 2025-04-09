@@ -263,9 +263,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             else SearchSortType.GENERAL
                         ),
                     )
-                    utils.logger.info(
-                        f"[XiaoHongShuCrawler.search] Search notes res:{notes_res}"
-                    )
+
                     if not notes_res or not notes_res.get("has_more", False):
                         utils.logger.info("No more content!")
                         break
@@ -283,6 +281,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     note_details = await asyncio.gather(*task_list)
                     for note_detail in note_details:
                         if note_detail:
+                            utils.logger.info(f"[XiaoHongShuCrawler.search] Search note_detail:{note_detail}")
                             await xhs_store.update_xhs_note(note_detail)
                             await self.get_and_store_user(note_detail.get("user_id"))
                             await self.get_notice_media(note_detail)
