@@ -159,21 +159,28 @@ class XiaoHongShuClient(AbstractApiClient):
             sign_data = await self.playwright_page.evaluate("""
                 () => {
                     const data = {};
-                    if (window._XSDATA) {
-                        data.xs = window._XSDATA.xs || '';
-                        data.xt = window._XSDATA.xt || '';
-                        data.xsCommon = window._XSDATA.xsCommon || '';
+                    try {
+                        if (window._XSDATA) {
+                            data.xs = window._XSDATA.xs || '';
+                            data.xt = window._XSDATA.xt || '';
+                            data.xsCommon = window._XSDATA.xsCommon || '';
+                        }
+                        // 尝试从localStorage获取
+                        if (!data.xs) {
+                            const stored = localStorage.getItem('_xs_data');
+                            if (stored) {
+                                const parsed = JSON.parse(stored);
+                                data.xs = parsed.xs || '';
+                                data.xt = parsed.xt || '';
+                                data.xsCommon = parsed.xsCommon || '';
+                            }
+                        }
+                    } catch (e) {
+                        console.error('获取签名数据失败:', e);
                     }
                     return data;
                 }
             """)
-            
-            if not sign_data.get("xs"):
-                utils.logger.warning("[XiaoHongShuClient._pre_headers] 未获取到签名数据，尝试重新获取")
-                # 尝试重新获取签名数据
-                await self.playwright_page.reload(wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(2)
-                sign_data = await self.playwright_page.evaluate("() => window._XSDATA || {}")
             
             # 使用页面中的签名数据
             headers = {
@@ -183,12 +190,29 @@ class XiaoHongShuClient(AbstractApiClient):
                 "X-B3-Traceid": str(random.randint(100000, 999999))
             }
             
+            # 如果没有获取到签名数据，使用默认值
+            if not headers["X-S"]:
+                utils.logger.warning("[XiaoHongShuClient._pre_headers] 使用默认签名数据")
+                headers.update({
+                    "X-S": "X0",
+                    "X-T": str(int(time.time())),
+                    "X-S-Common": "2UQAPsHC+aIjqArjwjHjqArj",
+                })
+            
             self.headers.update(headers)
             return headers
             
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient._pre_headers] 获取签名数据失败: {str(e)}")
-            return await super()._pre_headers(url, data)
+            # 使用默认签名数据
+            headers = {
+                "X-S": "X0",
+                "X-T": str(int(time.time())),
+                "X-S-Common": "2UQAPsHC+aIjqArjwjHjqArj",
+                "X-B3-Traceid": str(random.randint(100000, 999999))
+            }
+            self.headers.update(headers)
+            return headers
 
     async def request(
         self,
@@ -424,36 +448,6 @@ class XiaoHongShuClient(AbstractApiClient):
                     # 等待一段时间让页面继续加载
                     await asyncio.sleep(random.uniform(3, 5))
                     
-                    # 注入辅助函数
-                    await self.playwright_page.evaluate("""
-                        window._waitForXSDATA = function(timeout = 10000) {
-                            return new Promise((resolve, reject) => {
-                                const startTime = Date.now();
-                                const checkXSDATA = () => {
-                                    if (window._XSDATA) {
-                                        resolve(window._XSDATA);
-                                    } else if (Date.now() - startTime > timeout) {
-                                        reject(new Error('等待XSDATA超时'));
-                                    } else {
-                                        setTimeout(checkXSDATA, 100);
-                                    }
-                                };
-                                checkXSDATA();
-                            });
-                        };
-                    """)
-                    
-                    # 等待XSDATA加载
-                    try:
-                        xs_data = await self.playwright_page.evaluate("window._waitForXSDATA()")
-                        utils.logger.info("[XiaoHongShuClient.get_note_by_keyword] 成功获取XSDATA数据")
-                    except Exception as e:
-                        utils.logger.warning(f"[XiaoHongShuClient.get_note_by_keyword] 等待XSDATA超时: {str(e)}")
-                        # 尝试触发页面交互以加载XSDATA
-                        await self.playwright_page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-                        await asyncio.sleep(2)
-                        xs_data = await self.playwright_page.evaluate("window._XSDATA || {}")
-                    
                     # 获取初始化数据
                     initial_data = await self.playwright_page.evaluate("""
                         () => {
@@ -470,24 +464,6 @@ class XiaoHongShuClient(AbstractApiClient):
                             return data;
                         }
                     """)
-                    
-                    if not initial_data.get("xsData"):
-                        utils.logger.warning("[XiaoHongShuClient.get_note_by_keyword] 未获取到签名数据，尝试重新加载页面")
-                        # 清除缓存和cookie
-                        await self.playwright_page.context.clear_cookies()
-                        await self.playwright_page.evaluate("() => localStorage.clear()")
-                        await self.playwright_page.evaluate("() => sessionStorage.clear()")
-                        
-                        # 重新加载页面
-                        await self.playwright_page.reload(wait_until="domcontentloaded", timeout=60000)
-                        await asyncio.sleep(random.uniform(2, 4))
-                        
-                        # 重新等待XSDATA
-                        try:
-                            xs_data = await self.playwright_page.evaluate("window._waitForXSDATA()")
-                            utils.logger.info("[XiaoHongShuClient.get_note_by_keyword] 重新加载后成功获取XSDATA数据")
-                        except Exception as e:
-                            utils.logger.error(f"[XiaoHongShuClient.get_note_by_keyword] 重新加载后仍未获取到XSDATA: {str(e)}")
                     
                     # 直接访问搜索结果页
                     encoded_keyword = urllib.parse.quote(keyword)
