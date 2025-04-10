@@ -381,11 +381,15 @@ class XiaoHongShuCrawler(AbstractCrawler):
         Returns:
             Tuple[Optional[Dict], Optional[List[Dict]]]: 笔记详情和评论列表
         """
-        async with semaphore:
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
             try:
-                utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 开始处理笔记: {note_id}")
+                utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 开始处理笔记: {note_id}, 第{retry_count + 1}次尝试")
                 
-                # 设置获取笔记详情的超时时间
+                # 获取笔记详情
+                note_detail = None
                 try:
                     note_detail = await asyncio.wait_for(
                         self.get_note_detail_async_task(
@@ -394,18 +398,30 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             xsec_token=xsec_token,
                             semaphore=semaphore
                         ),
-                        timeout=30  # 30秒超时
+                        timeout=60  # 增加超时时间到60秒
                     )
                 except asyncio.TimeoutError:
                     utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取笔记详情超时: {note_id}")
-                    return None, None
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        return None, None
+                    await asyncio.sleep(random.uniform(5, 10))
+                    continue
                 except Exception as e:
                     utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取笔记详情失败: {note_id}, 错误: {str(e)}")
-                    return None, None
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        return None, None
+                    await asyncio.sleep(random.uniform(5, 10))
+                    continue
                 
                 if not note_detail:
                     utils.logger.warning(f"[XiaoHongShuCrawler.process_note_and_comments] 未获取到笔记详情: {note_id}")
-                    return None, None
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        return None, None
+                    await asyncio.sleep(random.uniform(5, 10))
+                    continue
                 
                 utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 成功获取笔记详情: {note_id}")
                 
@@ -423,7 +439,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                                 xsec_token=xsec_token,
                                 semaphore=semaphore
                             ),
-                            timeout=60  # 60秒超时
+                            timeout=60  # 增加超时时间到60秒
                         )
                         utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 成功获取评论: {note_id}, 评论数: {len(comments)}")
                     except asyncio.TimeoutError:
@@ -435,13 +451,12 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 
             except Exception as e:
                 utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 处理笔记和评论失败: {note_id}, 错误: {str(e)}")
-                return None, None
-            finally:
-                # 确保释放信号量
-                try:
-                    semaphore.release()
-                except Exception:
-                    pass
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return None, None
+                await asyncio.sleep(random.uniform(5, 10))
+        
+        return None, None
 
     async def get_comments_with_retry(
         self,
@@ -788,65 +803,130 @@ class XiaoHongShuCrawler(AbstractCrawler):
         xsec_token: str,
         semaphore: asyncio.Semaphore,
     ) -> Optional[Dict]:
-        """Get note detail
-
+        """获取笔记详情（带重试机制）
+        
         Args:
-            note_id:
-            xsec_source:
-            xsec_token:
-            semaphore:
-
+            note_id: 笔记ID
+            xsec_source: 来源
+            xsec_token: 令牌
+            semaphore: 并发控制信号量
+            
         Returns:
-            Dict: note detail
+            Optional[Dict]: 笔记详情
         """
-        note_detail_from_html, note_detail_from_api = None, None
-        async with semaphore:
-            # When proxy is not enabled, increase the crawling interval
-            if config.ENABLE_IP_PROXY:
-                crawl_interval = random.random()
-            else:
-                crawl_interval = random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC)
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
             try:
-                # 尝试直接获取网页版笔记详情，携带cookie
-                note_detail_from_html: Optional[Dict] = (
-                    await self.xhs_client.get_note_by_id_from_html(
-                        note_id, xsec_source, xsec_token, enable_cookie=True
-                    )
-                )
-                time.sleep(crawl_interval)
-                if not note_detail_from_html:
-                    # 如果网页版笔记详情获取失败，则尝试不使用cookie获取
-                    note_detail_from_html = (
-                        await self.xhs_client.get_note_by_id_from_html(
-                            note_id, xsec_source, xsec_token, enable_cookie=False
+                async with semaphore:
+                    utils.logger.info(f"[XiaoHongShuCrawler.get_note_detail_async_task] 开始获取笔记详情: {note_id}, 第{retry_count + 1}次尝试")
+                    
+                    # 获取新的代理
+                    if config.ENABLE_IP_PROXY:
+                        try:
+                            ip_proxy_pool = await create_ip_pool(
+                                config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
+                            )
+                            ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+                            _, httpx_proxy_format = self.format_proxy_info(ip_proxy_info)
+                            
+                            # 更新客户端的代理
+                            self.xhs_client.proxies = httpx_proxy_format
+                            utils.logger.info(f"[XiaoHongShuCrawler.get_note_detail_async_task] 已更新代理: {httpx_proxy_format}")
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 更新代理失败: {str(e)}")
+                    
+                    # 更新请求头
+                    try:
+                        # 获取新的签名数据
+                        await self.xhs_client.update_signature_data()
+                        # 更新User-Agent
+                        await self.xhs_client._rotate_user_agent()
+                        utils.logger.info("[XiaoHongShuCrawler.get_note_detail_async_task] 已更新请求头和签名数据")
+                    except Exception as e:
+                        utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 更新请求头失败: {str(e)}")
+                    
+                    # 增加随机延迟
+                    await asyncio.sleep(random.uniform(2, 4))
+                    
+                    # 尝试从HTML获取笔记详情
+                    note_detail_from_html = None
+                    try:
+                        note_detail_from_html = await asyncio.wait_for(
+                            self.xhs_client.get_note_by_id_from_html(
+                                note_id=note_id,
+                                xsec_source=xsec_source,
+                                xsec_token=xsec_token,
+                                enable_cookie=True
+                            ),
+                            timeout=30
                         )
-                    )
-                    utils.logger.error(
-                        f"[XiaoHongShuCrawler.get_note_detail_async_task] Get note detail error, note_id: {note_id}"
-                    )
-                if not note_detail_from_html:
-                    # 如果网页版笔记详情获取失败，则尝试API获取
-                    note_detail_from_api: Optional[Dict] = (
-                        await self.xhs_client.get_note_by_id(
-                            note_id, xsec_source, xsec_token
-                        )
-                    )
-                note_detail = note_detail_from_html or note_detail_from_api
-                if note_detail:
-                    note_detail.update(
-                        {"xsec_token": xsec_token, "xsec_source": xsec_source}
-                    )
-                    return note_detail
-            except DataFetchError as ex:
-                utils.logger.error(
-                    f"[XiaoHongShuCrawler.get_note_detail_async_task] Get note detail error: {ex}"
-                )
-                return None
-            except KeyError as ex:
-                utils.logger.error(
-                    f"[XiaoHongShuCrawler.get_note_detail_async_task] have not fund note detail note_id:{note_id}, err: {ex}"
-                )
-                return None
+                    except asyncio.TimeoutError:
+                        utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从HTML获取笔记详情超时: {note_id}")
+                    except Exception as e:
+                        utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从HTML获取笔记详情失败: {note_id}, 错误: {str(e)}")
+                    
+                    # 如果HTML获取失败，尝试不使用cookie
+                    if not note_detail_from_html:
+                        try:
+                            note_detail_from_html = await asyncio.wait_for(
+                                self.xhs_client.get_note_by_id_from_html(
+                                    note_id=note_id,
+                                    xsec_source=xsec_source,
+                                    xsec_token=xsec_token,
+                                    enable_cookie=False
+                                ),
+                                timeout=30
+                            )
+                        except asyncio.TimeoutError:
+                            utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从HTML获取笔记详情(无cookie)超时: {note_id}")
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从HTML获取笔记详情(无cookie)失败: {note_id}, 错误: {str(e)}")
+                    
+                    # 如果HTML获取失败，尝试API获取
+                    if not note_detail_from_html:
+                        try:
+                            note_detail_from_api = await asyncio.wait_for(
+                                self.xhs_client.get_note_by_id(
+                                    note_id=note_id,
+                                    xsec_source=xsec_source,
+                                    xsec_token=xsec_token
+                                ),
+                                timeout=30
+                            )
+                            if note_detail_from_api:
+                                note_detail_from_html = note_detail_from_api
+                        except asyncio.TimeoutError:
+                            utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从API获取笔记详情超时: {note_id}")
+                        except Exception as e:
+                            utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 从API获取笔记详情失败: {note_id}, 错误: {str(e)}")
+                    
+                    if note_detail_from_html:
+                        note_detail_from_html.update({
+                            "xsec_token": xsec_token,
+                            "xsec_source": xsec_source
+                        })
+                        utils.logger.info(f"[XiaoHongShuCrawler.get_note_detail_async_task] 成功获取笔记详情: {note_id}")
+                        return note_detail_from_html
+                    
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 获取笔记详情失败，已重试{max_retries}次: {note_id}")
+                        return None
+                    
+                    wait_time = random.uniform(5, 10)
+                    utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] 获取笔记详情失败，等待{wait_time}秒后重试: {note_id}")
+                    await asyncio.sleep(wait_time)
+                    
+            except Exception as e:
+                utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] 获取笔记详情出错: {note_id}, 错误: {str(e)}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return None
+                await asyncio.sleep(random.uniform(5, 10))
+        
+        return None
 
     async def batch_get_note_comments(
         self, note_list: List[str], xsec_tokens: List[str]
