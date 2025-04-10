@@ -409,6 +409,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 
                 utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 成功获取笔记详情: {note_id}")
                 
+                # 获取评论前增加延迟
+                await asyncio.sleep(random.uniform(3, 5))
+                
                 # 获取评论
                 comments = []
                 if config.ENABLE_GET_COMMENTS:
@@ -463,6 +466,34 @@ class XiaoHongShuCrawler(AbstractCrawler):
             try:
                 utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 开始获取评论: {note_id}, 第{retry_count + 1}次尝试")
                 
+                # 获取新的代理
+                if config.ENABLE_IP_PROXY:
+                    try:
+                        ip_proxy_pool = await create_ip_pool(
+                            config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
+                        )
+                        ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+                        _, httpx_proxy_format = self.format_proxy_info(ip_proxy_info)
+                        
+                        # 更新客户端的代理
+                        self.xhs_client.proxies = httpx_proxy_format
+                        utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 已更新代理: {httpx_proxy_format}")
+                    except Exception as e:
+                        utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 更新代理失败: {str(e)}")
+                
+                # 更新请求头
+                try:
+                    # 获取新的签名数据
+                    await self.xhs_client.update_signature_data()
+                    # 更新User-Agent
+                    await self.xhs_client._rotate_user_agent()
+                    utils.logger.info("[XiaoHongShuCrawler.get_comments_with_retry] 已更新请求头和签名数据")
+                except Exception as e:
+                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 更新请求头失败: {str(e)}")
+                
+                # 增加随机延迟
+                await asyncio.sleep(random.uniform(2, 4))
+                
                 comments = []
                 await self.xhs_client.get_note_all_comments(
                     note_id=note_id,
@@ -481,7 +512,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，已重试{max_retries}次: {note_id}, 错误: {str(e)}")
                     return []
                     
-                wait_time = random.uniform(2, 5)
+                wait_time = random.uniform(5, 10)  # 增加重试等待时间
                 utils.logger.warning(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，等待{wait_time}秒后重试: {note_id}, 错误: {str(e)}")
                 await asyncio.sleep(wait_time)
 
