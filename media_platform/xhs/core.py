@@ -246,6 +246,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 
                 while retry_count < max_retries:
                     try:
+                        utils.logger.info(f"[XiaoHongShuCrawler.search] 开始搜索第{page}页")
                         notes_res = await self.xhs_client.get_note_by_keyword(
                             keyword=keyword,
                             search_id=get_search_id(),
@@ -269,59 +270,81 @@ class XiaoHongShuCrawler(AbstractCrawler):
                             utils.logger.warning("[XiaoHongShuCrawler.search] 没有找到有效的笔记")
                             return
                         
+                        utils.logger.info(f"[XiaoHongShuCrawler.search] 找到{len(valid_items)}条有效笔记")
+                        
                         # 创建信号量控制并发
                         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
                         
-                        # 创建任务列表
-                        tasks = []
-                        for item in valid_items:
-                            # 获取笔记详情和评论的任务
-                            task = self.process_note_and_comments(
-                                note_id=item.get("id"),
-                                xsec_source=item.get("xsec_source"),
-                                xsec_token=item.get("xsec_token"),
-                                semaphore=semaphore
-                            )
-                            tasks.append(task)
-                        
-                        # 并发执行所有任务
-                        results = await asyncio.gather(*tasks, return_exceptions=True)
-                        
-                        # 处理结果
-                        processed_count = 0
-                        for result in results:
-                            if isinstance(result, Exception):
-                                utils.logger.error(f"[XiaoHongShuCrawler.search] 处理笔记失败: {str(result)}")
-                                continue
+                        # 分批处理笔记，每批5个
+                        batch_size = 5
+                        for i in range(0, len(valid_items), batch_size):
+                            batch_items = valid_items[i:i + batch_size]
+                            utils.logger.info(f"[XiaoHongShuCrawler.search] 开始处理第{i//batch_size + 1}批笔记，共{len(batch_items)}条")
+                            
+                            # 创建任务列表
+                            tasks = []
+                            for item in batch_items:
+                                task = self.process_note_and_comments(
+                                    note_id=item.get("id"),
+                                    xsec_source=item.get("xsec_source"),
+                                    xsec_token=item.get("xsec_token"),
+                                    semaphore=semaphore
+                                )
+                                tasks.append(task)
+                            
+                            # 并发执行当前批次的任务
+                            try:
+                                results = await asyncio.wait_for(
+                                    asyncio.gather(*tasks, return_exceptions=True),
+                                    timeout=180  # 3分钟超时
+                                )
                                 
-                            if result:
-                                note_detail, comments = result
-                                try:
-                                    # 保存笔记信息
-                                    await xhs_store.update_xhs_note(note_detail)
-                                    
-                                    # 保存作者信息
-                                    user = note_detail.get("user", {})
-                                    user_id = user.get("user_id")
-                                    if user_id:
-                                        await self.get_and_store_user(user_id)
-                                    
-                                    # 保存评论信息
-                                    if comments:
-                                        await self.batch_update_xhs_note_comments_and_store_user(
-                                            note_id=note_detail.get("note_id"),
-                                            comments=comments
-                                        )
-                                    
-                                    # 获取媒体文件
-                                    await self.get_notice_media(note_detail)
-                                    
-                                    processed_count += 1
-                                except Exception as e:
-                                    utils.logger.error(f"[XiaoHongShuCrawler.search] 保存数据失败: {str(e)}")
-                                    continue
+                                # 处理结果
+                                processed_count = 0
+                                for result in results:
+                                    if isinstance(result, Exception):
+                                        utils.logger.error(f"[XiaoHongShuCrawler.search] 处理笔记失败: {str(result)}")
+                                        continue
+                                        
+                                    if result:
+                                        note_detail, comments = result
+                                        try:
+                                            # 保存笔记信息
+                                            await xhs_store.update_xhs_note(note_detail)
+                                            
+                                            # 保存作者信息
+                                            user = note_detail.get("user", {})
+                                            user_id = user.get("user_id")
+                                            if user_id:
+                                                await self.get_and_store_user(user_id)
+                                            
+                                            # 保存评论信息
+                                            if comments:
+                                                await self.batch_update_xhs_note_comments_and_store_user(
+                                                    note_id=note_detail.get("note_id"),
+                                                    comments=comments
+                                                )
+                                            
+                                            # 获取媒体文件
+                                            await self.get_notice_media(note_detail)
+                                            
+                                            processed_count += 1
+                                        except Exception as e:
+                                            utils.logger.error(f"[XiaoHongShuCrawler.search] 保存数据失败: {str(e)}")
+                                            continue
+                                
+                                utils.logger.info(f"[XiaoHongShuCrawler.search] 成功处理第{i//batch_size + 1}批笔记，成功{processed_count}条")
+                                
+                                # 批次间增加随机延迟
+                                await asyncio.sleep(random.uniform(2, 4))
+                                
+                            except asyncio.TimeoutError:
+                                utils.logger.error(f"[XiaoHongShuCrawler.search] 处理第{i//batch_size + 1}批笔记超时")
+                                continue
+                            except Exception as e:
+                                utils.logger.error(f"[XiaoHongShuCrawler.search] 处理第{i//batch_size + 1}批笔记失败: {str(e)}")
+                                continue
                         
-                        utils.logger.info(f"[XiaoHongShuCrawler.search] 成功处理{processed_count}条笔记")
                         break  # 成功处理数据，跳出重试循环
                         
                     except DataFetchError as e:
@@ -360,34 +383,62 @@ class XiaoHongShuCrawler(AbstractCrawler):
         """
         async with semaphore:
             try:
-                # 获取笔记详情
-                note_detail = await self.get_note_detail_async_task(
-                    note_id=note_id,
-                    xsec_source=xsec_source,
-                    xsec_token=xsec_token,
-                    semaphore=semaphore
-                )
+                utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 开始处理笔记: {note_id}")
+                
+                # 设置获取笔记详情的超时时间
+                try:
+                    note_detail = await asyncio.wait_for(
+                        self.get_note_detail_async_task(
+                            note_id=note_id,
+                            xsec_source=xsec_source,
+                            xsec_token=xsec_token,
+                            semaphore=semaphore
+                        ),
+                        timeout=30  # 30秒超时
+                    )
+                except asyncio.TimeoutError:
+                    utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取笔记详情超时: {note_id}")
+                    return None, None
+                except Exception as e:
+                    utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取笔记详情失败: {note_id}, 错误: {str(e)}")
+                    return None, None
                 
                 if not note_detail:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.process_note_and_comments] 未获取到笔记详情: {note_id}")
                     return None, None
+                
+                utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 成功获取笔记详情: {note_id}")
                 
                 # 获取评论
                 comments = []
                 if config.ENABLE_GET_COMMENTS:
                     try:
-                        comments = await self.get_comments_with_retry(
-                            note_id=note_id,
-                            xsec_token=xsec_token,
-                            semaphore=semaphore
+                        # 设置获取评论的超时时间
+                        comments = await asyncio.wait_for(
+                            self.get_comments_with_retry(
+                                note_id=note_id,
+                                xsec_token=xsec_token,
+                                semaphore=semaphore
+                            ),
+                            timeout=60  # 60秒超时
                         )
+                        utils.logger.info(f"[XiaoHongShuCrawler.process_note_and_comments] 成功获取评论: {note_id}, 评论数: {len(comments)}")
+                    except asyncio.TimeoutError:
+                        utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取评论超时: {note_id}")
                     except Exception as e:
-                        utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取评论失败: {str(e)}")
+                        utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 获取评论失败: {note_id}, 错误: {str(e)}")
                 
                 return note_detail, comments
                 
             except Exception as e:
-                utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 处理笔记和评论失败: {str(e)}")
+                utils.logger.error(f"[XiaoHongShuCrawler.process_note_and_comments] 处理笔记和评论失败: {note_id}, 错误: {str(e)}")
                 return None, None
+            finally:
+                # 确保释放信号量
+                try:
+                    semaphore.release()
+                except Exception:
+                    pass
 
     async def get_comments_with_retry(
         self,
@@ -410,6 +461,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
         retry_count = 0
         while retry_count < max_retries:
             try:
+                utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 开始获取评论: {note_id}, 第{retry_count + 1}次尝试")
+                
                 comments = []
                 await self.xhs_client.get_note_all_comments(
                     note_id=note_id,
@@ -418,13 +471,19 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     callback=None,  # 不使用回调，直接返回评论列表
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
                 )
+                
+                utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 成功获取评论: {note_id}, 评论数: {len(comments)}")
                 return comments
+                
             except Exception as e:
                 retry_count += 1
                 if retry_count >= max_retries:
-                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，已重试{max_retries}次: {str(e)}")
+                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，已重试{max_retries}次: {note_id}, 错误: {str(e)}")
                     return []
-                await asyncio.sleep(random.uniform(2, 5))
+                    
+                wait_time = random.uniform(2, 5)
+                utils.logger.warning(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，等待{wait_time}秒后重试: {note_id}, 错误: {str(e)}")
+                await asyncio.sleep(wait_time)
 
     async def get_creators_and_notes(self):
         """获取创作者笔记和评论"""
