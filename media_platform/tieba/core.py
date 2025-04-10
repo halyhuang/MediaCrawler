@@ -313,3 +313,30 @@ class TieBaCrawler(AbstractCrawler):
         """
         await self.browser_context.close()
         utils.logger.info("[BaiduTieBaCrawler.close] Browser context closed ...")
+
+    async def get_post_comments(self, post_id: str, semaphore: asyncio.Semaphore):
+        """
+        get comment for post id
+        :param post_id:
+        :param semaphore:
+        :return:
+        """
+        async with semaphore:
+            try:
+                utils.logger.info(f"[TiebaCrawler.get_post_comments] begin get post_id: {post_id} comments ...")
+                # 添加超时处理
+                await asyncio.wait_for(
+                    self.tieba_client.get_post_all_comments(
+                        post_id=post_id,
+                        crawl_interval=random.randint(1,3),
+                        callback=tieba_store.batch_update_tieba_post_comments,
+                        max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+                    ),
+                    timeout=60  # 设置60秒超时
+                )
+            except asyncio.TimeoutError:
+                utils.logger.error(f"[TiebaCrawler.get_post_comments] get post_id: {post_id} comments timeout")
+            except DataFetchError as ex:
+                utils.logger.error(f"[TiebaCrawler.get_post_comments] get post_id: {post_id} comment error: {ex}")
+            except Exception as e:
+                utils.logger.error(f"[TiebaCrawler.get_post_comments] may be been blocked, err:{e}")

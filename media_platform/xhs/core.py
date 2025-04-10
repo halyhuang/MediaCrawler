@@ -510,26 +510,54 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 await asyncio.sleep(random.uniform(2, 4))
                 
                 comments = []
-                await self.xhs_client.get_note_all_comments(
-                    note_id=note_id,
-                    xsec_token=xsec_token,
-                    crawl_interval=random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC),
-                    callback=None,  # 不使用回调，直接返回评论列表
-                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
-                )
-                
-                utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 成功获取评论: {note_id}, 评论数: {len(comments)}")
-                return comments
-                
+                try:
+                    # 设置获取评论的超时时间
+                    comments = await asyncio.wait_for(
+                        self.xhs_client.get_note_all_comments(
+                            note_id=note_id,
+                            xsec_token=xsec_token,
+                            crawl_interval=random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC),
+                            callback=None,  # 不使用回调，直接返回评论列表
+                            max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+                        ),
+                        timeout=60  # 增加超时时间到60秒
+                    )
+                    
+                    if comments:
+                        utils.logger.info(f"[XiaoHongShuCrawler.get_comments_with_retry] 成功获取评论: {note_id}, 评论数: {len(comments)}")
+                        return comments
+                    else:
+                        utils.logger.warning(f"[XiaoHongShuCrawler.get_comments_with_retry] 未获取到评论: {note_id}")
+                        retry_count += 1
+                        if retry_count >= max_retries:
+                            return []
+                        await asyncio.sleep(random.uniform(5, 10))
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论超时: {note_id}")
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        return []
+                    await asyncio.sleep(random.uniform(5, 10))
+                    continue
+                    
+                except Exception as e:
+                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败: {note_id}, 错误: {str(e)}")
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        return []
+                    await asyncio.sleep(random.uniform(5, 10))
+                    continue
+                    
             except Exception as e:
+                utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 处理评论失败: {note_id}, 错误: {str(e)}")
                 retry_count += 1
                 if retry_count >= max_retries:
-                    utils.logger.error(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，已重试{max_retries}次: {note_id}, 错误: {str(e)}")
                     return []
-                    
-                wait_time = random.uniform(5, 10)  # 增加重试等待时间
-                utils.logger.warning(f"[XiaoHongShuCrawler.get_comments_with_retry] 获取评论失败，等待{wait_time}秒后重试: {note_id}, 错误: {str(e)}")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(random.uniform(5, 10))
+        
+        return []
 
     async def get_creators_and_notes(self):
         """获取创作者笔记和评论"""

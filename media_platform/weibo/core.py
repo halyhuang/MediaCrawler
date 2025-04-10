@@ -203,12 +203,17 @@ class WeiboCrawler(AbstractCrawler):
         async with semaphore:
             try:
                 utils.logger.info(f"[WeiboCrawler.get_note_comments] begin get note_id: {note_id} comments ...")
-                await self.wb_client.get_note_all_comments(
-                    note_id=note_id,
-                    crawl_interval=random.randint(1,3), # 微博对API的限流比较严重，所以延时提高一些
-                    callback=weibo_store.batch_update_weibo_note_comments,
-                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+                await asyncio.wait_for(
+                    self.wb_client.get_note_all_comments(
+                        note_id=note_id,
+                        crawl_interval=random.randint(1,3), # 微博对API的限流比较严重，所以延时提高一些
+                        callback=weibo_store.batch_update_weibo_note_comments,
+                        max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+                    ),
+                    timeout=60  # 设置60秒超时
                 )
+            except asyncio.TimeoutError:
+                utils.logger.error(f"[WeiboCrawler.get_note_comments] get note_id: {note_id} comments timeout")
             except DataFetchError as ex:
                 utils.logger.error(f"[WeiboCrawler.get_note_comments] get note_id: {note_id} comment error: {ex}")
             except Exception as e:

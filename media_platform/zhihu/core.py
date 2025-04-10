@@ -369,3 +369,30 @@ class ZhihuCrawler(AbstractCrawler):
         """Close browser context"""
         await self.browser_context.close()
         utils.logger.info("[ZhihuCrawler.close] Browser context closed ...")
+
+    async def get_content_comments(self, content_id: str, semaphore: asyncio.Semaphore):
+        """
+        get comment for content id
+        :param content_id:
+        :param semaphore:
+        :return:
+        """
+        async with semaphore:
+            try:
+                utils.logger.info(f"[ZhihuCrawler.get_content_comments] begin get content_id: {content_id} comments ...")
+                # 添加超时处理
+                await asyncio.wait_for(
+                    self.zhihu_client.get_content_all_comments(
+                        content_id=content_id,
+                        crawl_interval=random.randint(1,3),
+                        callback=zhihu_store.batch_update_zhihu_content_comments,
+                        max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+                    ),
+                    timeout=60  # 设置60秒超时
+                )
+            except asyncio.TimeoutError:
+                utils.logger.error(f"[ZhihuCrawler.get_content_comments] get content_id: {content_id} comments timeout")
+            except DataFetchError as ex:
+                utils.logger.error(f"[ZhihuCrawler.get_content_comments] get content_id: {content_id} comment error: {ex}")
+            except Exception as e:
+                utils.logger.error(f"[ZhihuCrawler.get_content_comments] may be been blocked, err:{e}")
