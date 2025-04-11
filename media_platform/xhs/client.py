@@ -449,7 +449,7 @@ class XiaoHongShuClient(AbstractApiClient):
                 utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
                 return response
             else:
-                utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
+                utils.logger.wgtiarning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
                 return None
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error: {e}")
