@@ -657,11 +657,6 @@ class XiaoHongShuClient(AbstractApiClient):
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
                 continue
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(1),
-        retry=retry_if_exception_type((httpx.TimeoutException, httpx.HTTPError))
-    )
     async def _make_request(self, url: str, headers: Dict[str, str]) -> Dict:
         try:
             async with httpx.AsyncClient(
