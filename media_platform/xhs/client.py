@@ -435,21 +435,18 @@ class XiaoHongShuClient(AbstractApiClient):
         PC端用户主页的网页存在window.__INITIAL_STATE__这个变量上的，解析它即可
         eg: https://www.xiaohongshu.com/user/profile/59d8cb33de5fb4696bf17217
         """
-        uri = f"/user/profile/{user_id}"
-        html_content = await self.request(
-            "GET", self._domain + uri, return_response=True, headers=self.headers
-        )
-        match = re.search(
-            r"<script>window.__INITIAL_STATE__=(.+)<\/script>", html_content, re.M
-        )
-
-        if match is None:
-            return {}
-
-        info = json.loads(match.group(1).replace(":undefined", ":null"), strict=False)
-        if info is None:
-            return {}
-        return info.get("user").get("userPageData")
+        try:
+            url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
+            headers = {
+                "User-Agent": self.user_agent,
+                "Cookie": self.cookie_str,
+                "Referer": "https://www.xiaohongshu.com",
+            }
+            response = await self._make_request(url, headers=headers)
+            return response
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error: {e}")
+            return None
 
     async def get_notes_by_creator(
         self, creator: str, cursor: str, page_size: int = 30
@@ -605,3 +602,33 @@ class XiaoHongShuClient(AbstractApiClient):
             return get_note_dict(html)
         except:
             return None
+
+    async def get_creators_and_notes(self) -> None:
+        """Get creator's notes and retrieve their comment information."""
+        utils.logger.info(
+            "[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creators"
+        )
+        
+        for user_id in config.XHS_CREATOR_ID_LIST:
+            try:
+                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Processing creator: {user_id}")
+                
+                # 1. 获取作者信息
+                createor_info = await self.get_creator_info(user_id=user_id)
+                if not createor_info:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to get creator info for user_id: {user_id}")
+                    continue
+                    
+                # 2. 保存作者信息
+                try:
+                    await xhs_store.save_creator(user_id, creator=createor_info)
+                    utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Successfully saved creator info for user_id: {user_id}")
+                except Exception as e:
+                    utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to save creator info: {e}")
+                    
+                # 3. 添加适当的延迟
+                await asyncio.sleep(random.uniform(1, 3))
+                
+            except Exception as e:
+                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
+                continue
