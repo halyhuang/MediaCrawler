@@ -652,6 +652,27 @@ class XiaoHongShuClient(AbstractApiClient):
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
                 continue
 
+    async def _make_request(self, url: str, headers: Dict[str, str]) -> Dict:
+        try:
+            async with httpx.AsyncClient(proxies=self.proxies, timeout=self.timeout) as client:
+                response = await client.get(url, headers=headers)
+                
+                if response.status_code == 200:
+                    try:
+                        return response.json()
+                    except json.JSONDecodeError:
+                        utils.logger.error(f"[XiaoHongShuClient._make_request] Invalid JSON response: {response.text}")
+                        return None
+                else:
+                    utils.logger.error(f"[XiaoHongShuClient._make_request] Request failed with status code: {response.status_code}")
+                    return None
+        except httpx.TimeoutException:
+            utils.logger.error(f"[XiaoHongShuClient._make_request] Request timeout for URL: {url}")
+            return None
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient._make_request] Error: {e}")
+            return None
+
 class ExpiringLocalCache:
     def __init__(self, expire_seconds: int = 600):
         self.cache = {}
