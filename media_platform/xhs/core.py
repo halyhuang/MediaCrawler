@@ -36,6 +36,34 @@ from .help import parse_note_info_from_note_url, get_search_id
 from .login import XiaoHongShuLogin
 
 
+class ExpiringLocalCache:
+    def __init__(self):
+        self._clear_task = None
+
+    async def _start_clear_cron(self):
+        try:
+            while True:
+                await asyncio.sleep(60)  # 每分钟清理一次
+                await self._clear_expired()
+        except asyncio.CancelledError:
+            utils.logger.info("Cache clear task cancelled")
+        except Exception as e:
+            utils.logger.error(f"Error in cache clear task: {e}")
+
+    async def start(self):
+        if self._clear_task is None:
+            self._clear_task = asyncio.create_task(self._start_clear_cron())
+
+    async def stop(self):
+        if self._clear_task:
+            self._clear_task.cancel()
+            try:
+                await self._clear_task
+            except asyncio.CancelledError:
+                pass
+            self._clear_task = None
+
+
 class XiaoHongShuCrawler(AbstractCrawler):
     context_page: Page
     xhs_client: XiaoHongShuClient
@@ -505,27 +533,27 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def close(self):
         """Close browser context and cleanup resources"""
         try:
-            # 1. 关闭所有打开的页面
+            # 1. 先关闭 XiaoHongShuClient
+            if hasattr(self, 'xhs_client') and self.xhs_client:
+                try:
+                    await self.xhs_client.close()
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close xhs client: {e}")
+
+            # 2. 关闭 context_page
             if hasattr(self, 'context_page') and self.context_page:
                 try:
                     await self.context_page.close()
                 except Exception as e:
                     utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close context page: {e}")
 
-            # 2. 关闭浏览器上下文
+            # 3. 最后关闭 browser_context
             if hasattr(self, 'browser_context') and self.browser_context:
                 try:
                     await self.browser_context.close()
                     utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
                 except Exception as e:
                     utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close browser context: {e}")
-
-            # 3. 清理其他资源
-            if hasattr(self, 'xhs_client') and self.xhs_client:
-                try:
-                    await self.xhs_client.close()
-                except Exception as e:
-                    utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close xhs client: {e}")
 
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuCrawler.close] Error during cleanup: {e}")
