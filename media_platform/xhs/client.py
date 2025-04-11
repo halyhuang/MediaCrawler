@@ -42,6 +42,7 @@ class XiaoHongShuClient(AbstractApiClient):
         self.proxies = proxies
         self.timeout = timeout
         self.headers = headers
+        self.user_agent = headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
         self._host = "https://edith.xiaohongshu.com"
         self._domain = "https://www.xiaohongshu.com"
         self.IP_ERROR_STR = "网络连接异常，请检查网络设置或重启试试"
@@ -442,8 +443,14 @@ class XiaoHongShuClient(AbstractApiClient):
                 "Cookie": self.cookie_str,
                 "Referer": "https://www.xiaohongshu.com",
             }
+            utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Requesting creator info for user_id: {user_id}")
             response = await self._make_request(url, headers=headers)
-            return response
+            if response:
+                utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
+                return response
+            else:
+                utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
+                return None
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error: {e}")
             return None
