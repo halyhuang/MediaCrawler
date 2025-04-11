@@ -687,7 +687,13 @@ class ExpiringLocalCache:
 async def main():
     crawler = None
     try:
-        # ... 现有代码 ...
+        # 初始化爬虫
+        crawler = XiaoHongShuCrawler()
+        await crawler.start()
+        
+        # 获取作者信息
+        await crawler.get_creators_and_notes()
+        
     except Exception as e:
         utils.logger.error(f"Error in main: {e}")
     finally:
@@ -696,3 +702,6 @@ async def main():
                 await crawler.close()
         except Exception as e:
             utils.logger.error(f"Error closing crawler: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
