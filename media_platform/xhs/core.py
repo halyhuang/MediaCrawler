@@ -251,11 +251,11 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def get_creators_and_notes(self) -> None:
         """Get creator's notes and retrieve their comment information."""
         utils.logger.info(
-            "[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creators"
+            f"[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creators:{config.XHS_CREATOR_ID_LIST}"
         )
         for user_id in config.XHS_CREATOR_ID_LIST:
             # get creator detail info from web html content
-            utils.logger.info("[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creator:{user_id}")
+            utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creator:{user_id}")
             createor_info: Dict = await self.xhs_client.get_creator_info(
                 user_id=user_id
             )
@@ -263,16 +263,16 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 await xhs_store.save_creator(user_id, creator=createor_info)
 
             # When proxy is not enabled, increase the crawling interval
-            if config.ENABLE_IP_PROXY:
-                crawl_interval = random.random()
-            else:
-                crawl_interval = random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC)
+            # if config.ENABLE_IP_PROXY:
+            #     crawl_interval = random.random()
+            # else:
+            #     crawl_interval = random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC)
             # Get all note information of the creator
-            all_notes_list = await self.xhs_client.get_all_notes_by_creator(
-                user_id=user_id,
-                crawl_interval=crawl_interval,
-                callback=self.fetch_creator_notes_detail,
-            )
+            # all_notes_list = await self.xhs_client.get_all_notes_by_creator(
+            #     user_id=user_id,
+            #     crawl_interval=crawl_interval,
+            #     callback=self.fetch_creator_notes_detail,
+            # )
 
             # note_ids = []
             # xsec_tokens = []
