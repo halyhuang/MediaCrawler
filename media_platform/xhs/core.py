@@ -503,12 +503,37 @@ class XiaoHongShuCrawler(AbstractCrawler):
             return browser_context
 
     async def close(self):
-        """Close browser context"""
-        if hasattr(self, 'browser_context') and self.browser_context:
-            await self.browser_context.close()
-            utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
-        else:
-            utils.logger.warning("[XiaoHongShuCrawler.close] Browser context not initialized, skipping close ...")
+        """Close browser context and cleanup resources"""
+        try:
+            # 1. 关闭所有打开的页面
+            if hasattr(self, 'context_page') and self.context_page:
+                try:
+                    await self.context_page.close()
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close context page: {e}")
+
+            # 2. 关闭浏览器上下文
+            if hasattr(self, 'browser_context') and self.browser_context:
+                try:
+                    await self.browser_context.close()
+                    utils.logger.info("[XiaoHongShuCrawler.close] Browser context closed ...")
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close browser context: {e}")
+
+            # 3. 清理其他资源
+            if hasattr(self, 'xhs_client') and self.xhs_client:
+                try:
+                    await self.xhs_client.close()
+                except Exception as e:
+                    utils.logger.warning(f"[XiaoHongShuCrawler.close] Failed to close xhs client: {e}")
+
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuCrawler.close] Error during cleanup: {e}")
+        finally:
+            # 4. 确保所有属性被清理
+            self.context_page = None
+            self.browser_context = None
+            self.xhs_client = None
 
     async def get_notice_media(self, note_detail: Dict):
         if not config.ENABLE_GET_IMAGES:
