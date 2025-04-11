@@ -51,6 +51,16 @@ class XiaoHongShuClient(AbstractApiClient):
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
+        self.cookie_str = "; ".join([f"{k}={v}" for k, v in cookie_dict.items()])
+
+    async def close(self) -> None:
+        """关闭客户端资源"""
+        try:
+            if self.playwright_page:
+                await self.playwright_page.close()
+            utils.logger.info("[XiaoHongShuClient.close] Successfully closed client resources")
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.close] Error closing client: {e}")
 
     async def _pre_headers(self, url: str, data=None) -> Dict:
         """
@@ -431,11 +441,7 @@ class XiaoHongShuClient(AbstractApiClient):
         return result
 
     async def get_creator_info(self, user_id: str) -> Dict:
-        """
-        通过解析网页版的用户主页HTML，获取用户个人简要信息
-        PC端用户主页的网页存在window.__INITIAL_STATE__这个变量上的，解析它即可
-        eg: https://www.xiaohongshu.com/user/profile/59d8cb33de5fb4696bf17217
-        """
+        """获取作者信息"""
         try:
             url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
             headers = {
@@ -444,13 +450,19 @@ class XiaoHongShuClient(AbstractApiClient):
                 "Referer": "https://www.xiaohongshu.com",
             }
             utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Requesting creator info for user_id: {user_id}")
-            response = await self._make_request(url, headers=headers)
+            
+            async with asyncio.timeout(30):  # 添加30秒超时
+                response = await self._make_request(url, headers=headers)
+            
             if response:
                 utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
                 return response
             else:
-                utils.logger.wgtiarning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
+                utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
                 return None
+        except asyncio.TimeoutError:
+            utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Timeout for user_id: {user_id}")
+            return None
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error: {e}")
             return None
@@ -639,3 +651,48 @@ class XiaoHongShuClient(AbstractApiClient):
             except Exception as e:
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
                 continue
+
+class ExpiringLocalCache:
+    def __init__(self, expire_seconds: int = 600):
+        self.cache = {}
+        self.expire_seconds = expire_seconds
+        self._clear_task = None
+        
+    async def start(self):
+        """启动清理任务"""
+        if self._clear_task is None:
+            self._clear_task = asyncio.create_task(self._start_clear_cron())
+            
+    async def stop(self):
+        """停止清理任务"""
+        if self._clear_task:
+            self._clear_task.cancel()
+            try:
+                await self._clear_task
+            except asyncio.CancelledError:
+                pass
+            self._clear_task = None
+            
+    async def _start_clear_cron(self) -> None:
+        """启动定时清理任务"""
+        try:
+            while True:
+                await asyncio.sleep(self.expire_seconds)
+                await self.clear_expired()
+        except asyncio.CancelledError:
+            utils.logger.info("[ExpiringLocalCache._start_clear_cron] Clear cron task cancelled")
+        except Exception as e:
+            utils.logger.error(f"[ExpiringLocalCache._start_clear_cron] Error: {e}")
+
+async def main():
+    crawler = None
+    try:
+        # ... 现有代码 ...
+    except Exception as e:
+        utils.logger.error(f"Error in main: {e}")
+    finally:
+        try:
+            if crawler:
+                await crawler.close()
+        except Exception as e:
+            utils.logger.error(f"Error closing crawler: {e}")
