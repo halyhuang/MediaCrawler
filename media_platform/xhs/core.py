@@ -234,23 +234,23 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 await xhs_store.save_creator(user_id, creator=createor_info)
 
             # When proxy is not enabled, increase the crawling interval
-            if config.ENABLE_IP_PROXY:
-                crawl_interval = random.random()
-            else:
-                crawl_interval = random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC)
-            # Get all note information of the creator
-            all_notes_list = await self.xhs_client.get_all_notes_by_creator(
-                user_id=user_id,
-                crawl_interval=crawl_interval,
-                callback=self.fetch_creator_notes_detail,
-            )
+            # if config.ENABLE_IP_PROXY:
+            #     crawl_interval = random.random()
+            # else:
+            #     crawl_interval = random.uniform(1, config.CRAWLER_MAX_SLEEP_SEC)
+            # # Get all note information of the creator
+            # all_notes_list = await self.xhs_client.get_all_notes_by_creator(
+            #     user_id=user_id,
+            #     crawl_interval=crawl_interval,
+            #     callback=self.fetch_creator_notes_detail,
+            # )
 
-            note_ids = []
-            xsec_tokens = []
-            for note_item in all_notes_list:
-                note_ids.append(note_item.get("note_id"))
-                xsec_tokens.append(note_item.get("xsec_token"))
-            await self.batch_get_note_comments(note_ids, xsec_tokens)
+            # note_ids = []
+            # xsec_tokens = []
+            # for note_item in all_notes_list:
+            #     note_ids.append(note_item.get("note_id"))
+            #     xsec_tokens.append(note_item.get("xsec_token"))
+            # await self.batch_get_note_comments(note_ids, xsec_tokens)
 
     async def fetch_creator_notes_detail(self, note_list: List[Dict]):
         """
