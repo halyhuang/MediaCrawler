@@ -443,6 +443,11 @@ class XiaoHongShuClient(AbstractApiClient):
     async def get_creator_info(self, user_id: str) -> Dict:
         """获取作者信息"""
         try:
+            # 验证Cookie是否有效
+            if not self.cookie_str or "web_session" not in self.cookie_str:
+                utils.logger.error("[XiaoHongShuClient.get_creator_info] Invalid or missing cookie")
+                return None
+            
             url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
             headers = {
                 "User-Agent": self.user_agent,
@@ -652,13 +657,30 @@ class XiaoHongShuClient(AbstractApiClient):
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
                 continue
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.HTTPError))
+    )
     async def _make_request(self, url: str, headers: Dict[str, str]) -> Dict:
         try:
-            async with httpx.AsyncClient(proxies=self.proxies, timeout=self.timeout) as client:
+            async with httpx.AsyncClient(
+                proxies=self.proxies,
+                timeout=self.timeout,
+                follow_redirects=True,  # 允许跟随重定向
+                verify=False  # 忽略SSL验证
+            ) as client:
                 response = await client.get(url, headers=headers)
                 
-                if response.status_code == 200:
+                if response.status_code in [200, 302]:
                     try:
+                        # 如果是重定向，获取重定向后的URL
+                        if response.status_code == 302:
+                            redirect_url = response.headers.get('Location')
+                            if redirect_url:
+                                utils.logger.info(f"[XiaoHongShuClient._make_request] Following redirect to: {redirect_url}")
+                                response = await client.get(redirect_url, headers=headers)
+                        
                         return response.json()
                     except json.JSONDecodeError:
                         utils.logger.error(f"[XiaoHongShuClient._make_request] Invalid JSON response: {response.text}")
