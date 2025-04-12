@@ -295,6 +295,7 @@ CREATE TABLE `xhs_creator`
 (
     `id`             int         NOT NULL AUTO_INCREMENT COMMENT '自增ID',
     `user_id`        varchar(64) NOT NULL COMMENT '用户ID',
+    `red_id`         varchar(20) DEFAULT NULL COMMENT '小红书号',
     `nickname`       varchar(64)  DEFAULT NULL COMMENT '用户昵称',
     `avatar`         varchar(255) DEFAULT NULL COMMENT '用户头像地址',
     `ip_location`    varchar(255) DEFAULT NULL COMMENT '评论时的IP地址',
