@@ -441,48 +441,26 @@ class XiaoHongShuClient(AbstractApiClient):
         return result
 
     async def get_creator_info(self, user_id: str) -> Dict:
-        """获取作者信息"""
-        try:
-            # 1. 验证Cookie是否有效
-            if not self.cookie_str or "web_session" not in self.cookie_str:
-                utils.logger.error("[XiaoHongShuClient.get_creator_info] Invalid or missing cookie")
-                return None
-            
-            # 2. 使用网页接口
-            url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
-            headers = {
-                "User-Agent": self.user_agent,
-                "Cookie": self.cookie_str,
-                "Referer": "https://www.xiaohongshu.com",
-            }
-            
-            utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Requesting creator info for user_id: {user_id}")
-            
-            # 3. 获取HTML响应
-            async with asyncio.timeout(30):
-                html_content = await self._make_request(url, headers=headers, expect_json=False)
-            
-            if html_content:
-                # 4. 解析HTML提取作者信息
-                try:
-                    # 使用正则表达式或其他HTML解析方法提取数据
-                    # 这里需要根据实际的HTML结构来提取数据
-                    creator_info = self._parse_creator_info_from_html(html_content)
-                    if creator_info:
-                        utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
-                        return creator_info
-                except Exception as e:
-                    utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error parsing HTML: {e}")
-                    
-            utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
-            return None
-            
-        except asyncio.TimeoutError:
-            utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Timeout for user_id: {user_id}")
-            return None
-        except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error: {e}")
-            return None
+        """
+        通过解析网页版的用户主页HTML，获取用户个人简要信息
+        PC端用户主页的网页存在window.__INITIAL_STATE__这个变量上的，解析它即可
+        eg: https://www.xiaohongshu.com/user/profile/59d8cb33de5fb4696bf17217
+        """
+        uri = f"/user/profile/{user_id}"
+        html_content = await self.request(
+            "GET", self._domain + uri, return_response=True, headers=self.headers
+        )
+        match = re.search(
+            r"<script>window.__INITIAL_STATE__=(.+)<\/script>", html_content, re.M
+        )
+
+        if match is None:
+            return {}
+
+        info = json.loads(match.group(1).replace(":undefined", ":null"), strict=False)
+        if info is None:
+            return {}
+        return info.get("user").get("userPageData")
 
     async def get_notes_by_creator(
         self, creator: str, cursor: str, page_size: int = 30
@@ -638,178 +616,3 @@ class XiaoHongShuClient(AbstractApiClient):
             return get_note_dict(html)
         except:
             return None
-
-    async def get_creators_and_notes(self) -> None:
-        """Get creator's notes and retrieve their comment information."""
-        utils.logger.info(
-            "[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creators"
-        )
-        
-        for user_id in config.XHS_CREATOR_ID_LIST:
-            try:
-                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Processing creator: {user_id}")
-                
-                # 1. 获取作者信息
-                createor_info = await self.get_creator_info(user_id=user_id)
-                if not createor_info:
-                    utils.logger.warning(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to get creator info for user_id: {user_id}")
-                    continue
-                    
-                # 2. 保存作者信息
-                try:
-                    await xhs_store.save_creator(user_id, creator=createor_info)
-                    utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Successfully saved creator info for user_id: {user_id}")
-                except Exception as e:
-                    utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to save creator info: {e}")
-                    
-                # 3. 添加适当的延迟
-                await asyncio.sleep(random.uniform(1, 3))
-                
-            except Exception as e:
-                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
-                continue
-
-    async def _make_request(self, url: str, headers: Dict[str, str], expect_json: bool = True) -> Union[Dict, str]:
-        """
-        发送HTTP请求
-        Args:
-            url: 请求URL
-            headers: 请求头
-            expect_json: 是否期望返回JSON格式，默认为True
-        Returns:
-            Union[Dict, str]: 返回JSON对象或HTML文本
-        """
-        try:
-            async with httpx.AsyncClient(
-                proxies=self.proxies,
-                timeout=self.timeout,
-                follow_redirects=True,
-                verify=False
-            ) as client:
-                response = await client.get(url, headers=headers)
-                
-                if response.status_code in [200, 302]:
-                    try:
-                        # 如果是重定向，获取重定向后的URL
-                        if response.status_code == 302:
-                            redirect_url = response.headers.get('Location')
-                            if redirect_url:
-                                utils.logger.info(f"[XiaoHongShuClient._make_request] Following redirect to: {redirect_url}")
-                                response = await client.get(redirect_url, headers=headers)
-                        
-                        # 根据expect_json参数决定返回格式
-                        if expect_json:
-                            return response.json()
-                        else:
-                            return response.text
-                        
-                    except json.JSONDecodeError as e:
-                        if expect_json:
-                            utils.logger.error(f"[XiaoHongShuClient._make_request] Invalid JSON response: {response.text[:200]}")
-                            return None
-                        else:
-                            return response.text
-                        
-                else:
-                    utils.logger.error(f"[XiaoHongShuClient._make_request] Request failed with status code: {response.status_code}")
-                    return None
-                
-        except httpx.TimeoutException:
-            utils.logger.error(f"[XiaoHongShuClient._make_request] Request timeout for URL: {url}")
-            return None
-        except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient._make_request] Error: {e}")
-            return None
-
-    def _parse_creator_info_from_html(self, html_content: str) -> Dict:
-        """从HTML中解析作者信息"""
-        try:
-            # 使用正则表达式或其他HTML解析方法提取数据
-            # 这里需要根据实际的HTML结构来提取数据
-            # 示例：
-            import re
-            from bs4 import BeautifulSoup
-            
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # 提取作者信息
-            creator_info = {
-                "user_id": None,
-                "nickname": None,
-                "avatar": None,
-                "description": None,
-                "follower_count": None,
-                "following_count": None,
-                "note_count": None
-            }
-            
-            # 根据实际的HTML结构提取数据
-            # 这里需要根据实际的HTML结构来修改
-            script_content = soup.find('script', text=re.compile('window.__INITIAL_STATE__'))
-            if script_content:
-                # 提取JSON数据
-                json_str = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', script_content.string, re.DOTALL)
-                if json_str:
-                    data = json.loads(json_str.group(1))
-                    # 从data中提取作者信息
-                    # ...
-                    
-            return creator_info
-            
-        except Exception as e:
-            utils.logger.error(f"[XiaoHongShuClient._parse_creator_info_from_html] Error parsing HTML: {e}")
-            return None
-
-class ExpiringLocalCache:
-    def __init__(self, expire_seconds: int = 600):
-        self.cache = {}
-        self.expire_seconds = expire_seconds
-        self._clear_task = None
-        
-    async def start(self):
-        """启动清理任务"""
-        if self._clear_task is None:
-            self._clear_task = asyncio.create_task(self._start_clear_cron())
-            
-    async def stop(self):
-        """停止清理任务"""
-        if self._clear_task:
-            self._clear_task.cancel()
-            try:
-                await self._clear_task
-            except asyncio.CancelledError:
-                pass
-            self._clear_task = None
-            
-    async def _start_clear_cron(self) -> None:
-        """启动定时清理任务"""
-        try:
-            while True:
-                await asyncio.sleep(self.expire_seconds)
-                await self.clear_expired()
-        except asyncio.CancelledError:
-            utils.logger.info("[ExpiringLocalCache._start_clear_cron] Clear cron task cancelled")
-        except Exception as e:
-            utils.logger.error(f"[ExpiringLocalCache._start_clear_cron] Error: {e}")
-
-async def main():
-    crawler = None
-    try:
-        # 初始化爬虫
-        crawler = XiaoHongShuCrawler()
-        await crawler.start()
-        
-        # 获取作者信息
-        await crawler.get_creators_and_notes()
-        
-    except Exception as e:
-        utils.logger.error(f"Error in main: {e}")
-    finally:
-        try:
-            if crawler:
-                await crawler.close()
-        except Exception as e:
-            utils.logger.error(f"Error closing crawler: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
