@@ -111,7 +111,7 @@ class ProxyIpPool:
         self.proxy_list = await self.ip_provider.get_proxies(self.ip_pool_count)
         
         # 保存到缓存
-        self.save_proxies_to_cache()
+        # self.save_proxies_to_cache()
 
     async def _is_valid_proxy(self, proxy: IpInfoModel) -> bool:
         """

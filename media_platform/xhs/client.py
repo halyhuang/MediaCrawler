@@ -443,28 +443,40 @@ class XiaoHongShuClient(AbstractApiClient):
     async def get_creator_info(self, user_id: str) -> Dict:
         """获取作者信息"""
         try:
-            # 验证Cookie是否有效
+            # 1. 验证Cookie是否有效
             if not self.cookie_str or "web_session" not in self.cookie_str:
                 utils.logger.error("[XiaoHongShuClient.get_creator_info] Invalid or missing cookie")
                 return None
             
+            # 2. 使用网页接口
             url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
             headers = {
                 "User-Agent": self.user_agent,
                 "Cookie": self.cookie_str,
                 "Referer": "https://www.xiaohongshu.com",
             }
+            
             utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Requesting creator info for user_id: {user_id}")
             
-            async with asyncio.timeout(30):  # 添加30秒超时
-                response = await self._make_request(url, headers=headers)
+            # 3. 获取HTML响应
+            async with asyncio.timeout(30):
+                html_content = await self._make_request(url, headers=headers, expect_json=False)
             
-            if response:
-                utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
-                return response
-            else:
-                utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
-                return None
+            if html_content:
+                # 4. 解析HTML提取作者信息
+                try:
+                    # 使用正则表达式或其他HTML解析方法提取数据
+                    # 这里需要根据实际的HTML结构来提取数据
+                    creator_info = self._parse_creator_info_from_html(html_content)
+                    if creator_info:
+                        utils.logger.info(f"[XiaoHongShuClient.get_creator_info] Successfully got creator info for user_id: {user_id}")
+                        return creator_info
+                except Exception as e:
+                    utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Error parsing HTML: {e}")
+                    
+            utils.logger.warning(f"[XiaoHongShuClient.get_creator_info] Empty response for user_id: {user_id}")
+            return None
+            
         except asyncio.TimeoutError:
             utils.logger.error(f"[XiaoHongShuClient.get_creator_info] Timeout for user_id: {user_id}")
             return None
@@ -657,13 +669,22 @@ class XiaoHongShuClient(AbstractApiClient):
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Error processing creator {user_id}: {e}")
                 continue
 
-    async def _make_request(self, url: str, headers: Dict[str, str]) -> Dict:
+    async def _make_request(self, url: str, headers: Dict[str, str], expect_json: bool = True) -> Union[Dict, str]:
+        """
+        发送HTTP请求
+        Args:
+            url: 请求URL
+            headers: 请求头
+            expect_json: 是否期望返回JSON格式，默认为True
+        Returns:
+            Union[Dict, str]: 返回JSON对象或HTML文本
+        """
         try:
             async with httpx.AsyncClient(
                 proxies=self.proxies,
                 timeout=self.timeout,
-                follow_redirects=True,  # 允许跟随重定向
-                verify=False  # 忽略SSL验证
+                follow_redirects=True,
+                verify=False
             ) as client:
                 response = await client.get(url, headers=headers)
                 
@@ -676,18 +697,67 @@ class XiaoHongShuClient(AbstractApiClient):
                                 utils.logger.info(f"[XiaoHongShuClient._make_request] Following redirect to: {redirect_url}")
                                 response = await client.get(redirect_url, headers=headers)
                         
-                        return response.json()
-                    except json.JSONDecodeError:
-                        utils.logger.error(f"[XiaoHongShuClient._make_request] Invalid JSON response: {response.text}")
-                        return None
+                        # 根据expect_json参数决定返回格式
+                        if expect_json:
+                            return response.json()
+                        else:
+                            return response.text
+                        
+                    except json.JSONDecodeError as e:
+                        if expect_json:
+                            utils.logger.error(f"[XiaoHongShuClient._make_request] Invalid JSON response: {response.text[:200]}")
+                            return None
+                        else:
+                            return response.text
+                        
                 else:
                     utils.logger.error(f"[XiaoHongShuClient._make_request] Request failed with status code: {response.status_code}")
                     return None
+                
         except httpx.TimeoutException:
             utils.logger.error(f"[XiaoHongShuClient._make_request] Request timeout for URL: {url}")
             return None
         except Exception as e:
             utils.logger.error(f"[XiaoHongShuClient._make_request] Error: {e}")
+            return None
+
+    def _parse_creator_info_from_html(self, html_content: str) -> Dict:
+        """从HTML中解析作者信息"""
+        try:
+            # 使用正则表达式或其他HTML解析方法提取数据
+            # 这里需要根据实际的HTML结构来提取数据
+            # 示例：
+            import re
+            from bs4 import BeautifulSoup
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # 提取作者信息
+            creator_info = {
+                "user_id": None,
+                "nickname": None,
+                "avatar": None,
+                "description": None,
+                "follower_count": None,
+                "following_count": None,
+                "note_count": None
+            }
+            
+            # 根据实际的HTML结构提取数据
+            # 这里需要根据实际的HTML结构来修改
+            script_content = soup.find('script', text=re.compile('window.__INITIAL_STATE__'))
+            if script_content:
+                # 提取JSON数据
+                json_str = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', script_content.string, re.DOTALL)
+                if json_str:
+                    data = json.loads(json_str.group(1))
+                    # 从data中提取作者信息
+                    # ...
+                    
+            return creator_info
+            
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient._parse_creator_info_from_html] Error parsing HTML: {e}")
             return None
 
 class ExpiringLocalCache:
