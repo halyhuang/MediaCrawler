@@ -104,8 +104,8 @@ class ProxyIpPool:
         Returns:
         """
         # 首先尝试从缓存加载
-        if self.load_cached_proxies():
-            return
+        # if self.load_cached_proxies():
+        #     return
             
         # 如果缓存中没有有效的代理，则从API获取
         self.proxy_list = await self.ip_provider.get_proxies(self.ip_pool_count)
