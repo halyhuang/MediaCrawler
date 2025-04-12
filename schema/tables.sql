@@ -307,9 +307,12 @@ CREATE TABLE `xhs_creator`
     `fans`           varchar(16)  DEFAULT NULL COMMENT '粉丝数',
     `interaction`    varchar(16)  DEFAULT NULL COMMENT '获赞和收藏数',
     `tag_list`       longtext COMMENT '标签列表',
-    PRIMARY KEY (`id`)
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `xhs_creator_user_id_IDX` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='小红书博主';
 
+-- ----------------------------
+-- Table structure for xhs_note
 -- ----------------------------
 -- Table structure for xhs_note
 -- ----------------------------
