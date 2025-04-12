@@ -172,7 +172,6 @@ async def save_creator(user_id: str, creator: Dict):
     Returns:
 
     """
-    utils.logger.info(f"[store.xhs.save_creator] creator:{creator}")
     user_info = creator.get('basicInfo', {})
 
     follows = 0
@@ -196,6 +195,7 @@ async def save_creator(user_id: str, creator: Dict):
 
     local_db_item = {
         'user_id': user_id,  # 用户id
+        'red_id': user_info.get('redId'),  # 小红书号
         'nickname': user_info.get('nickname'),  # 昵称
         'gender':  get_gender(user_info.get('gender')), # 性别
         'avatar': user_info.get('images'), # 头像
