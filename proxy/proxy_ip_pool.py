@@ -269,6 +269,23 @@ class ProxyIpPool:
         self.proxy_list = []
         await self.load_proxies()
 
+    async def verify_cookie(self) -> bool:
+        """验证Cookie是否有效"""
+        try:
+            url = "https://edith.xiaohongshu.com/api/sns/web/v1/user/selfinfo"
+            headers = {
+                "User-Agent": self.user_agent,
+                "Cookie": self.cookie_str,
+                "Referer": "https://www.xiaohongshu.com"
+            }
+            
+            async with httpx.AsyncClient(proxies=self.proxies, timeout=self.timeout) as client:
+                response = await client.get(url, headers=headers)
+                return response.status_code == 200 and 'application/json' in response.headers.get('content-type', '')
+                
+        except Exception as e:
+            utils.logger.error(f"[XiaoHongShuClient.verify_cookie] Error: {e}")
+            return False
 
 IpProxyProvider: Dict[str, ProxyProvider] = {
     ProviderNameEnum.JISHU_HTTP_PROVIDER.value: new_jisu_http_proxy(),
