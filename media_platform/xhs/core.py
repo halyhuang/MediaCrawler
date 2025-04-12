@@ -255,13 +255,14 @@ class XiaoHongShuCrawler(AbstractCrawler):
         )
         for user_id in config.XHS_CREATOR_ID_LIST:
             # get creator detail info from web html content
+            time.sleep(random.uniform(3, 10))
             utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Begin get xiaohongshu creator:{user_id}")
             createor_info: Dict = await self.xhs_client.get_creator_info(
                 user_id=user_id
             )
             if createor_info:
                 await xhs_store.save_creator(user_id, creator=createor_info)
-
+            
             # When proxy is not enabled, increase the crawling interval
             # if config.ENABLE_IP_PROXY:
             #     crawl_interval = random.random()
