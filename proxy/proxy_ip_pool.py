@@ -304,7 +304,8 @@ async def create_ip_pool(ip_pool_count: int, enable_validate_ip: bool) -> ProxyI
                        enable_validate_ip=enable_validate_ip,
                        ip_provider=IpProxyProvider.get(config.IP_PROXY_PROVIDER_NAME)
                        )
-    await pool.load_proxies()
+    pool.clear_cache()  # 清除缓存
+    await pool.load_proxies()  # 重新加载代理
     return pool
 
 
