@@ -299,11 +299,14 @@ class DouYinCrawler(AbstractCrawler):
 
     async def close(self) -> None:
         """Close browser context"""
-        if self.browser_context:
-            await self.browser_context.close()
-        if self.playwright:
-            await self.playwright.stop()
-        utils.logger.info("[DouYinCrawler.close] Browser context closed ...")
+        try:
+            if hasattr(self, 'browser_context') and self.browser_context:
+                await self.browser_context.close()
+            if hasattr(self, 'playwright') and self.playwright:
+                await self.playwright.stop()
+            utils.logger.info("[DouYinCrawler.close] Browser context closed ...")
+        except Exception as e:
+            utils.logger.error(f"[DouYinCrawler.close] Error closing crawler: {e}")
 
     async def search_and_follow_user(self, user_keyword: str) -> None:
         """
