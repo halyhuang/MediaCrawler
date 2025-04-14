@@ -30,6 +30,7 @@ from .client import DOUYINClient
 from .exception import DataFetchError
 from .field import PublishTimeType
 from .login import DouYinLogin
+from .cache import ExpiringLocalCache
 
 
 class DouYinCrawler(AbstractCrawler):
@@ -37,11 +38,13 @@ class DouYinCrawler(AbstractCrawler):
     dy_client: DOUYINClient
     browser_context: BrowserContext
     playwright: Any
+    local_cache: ExpiringLocalCache
 
     def __init__(self) -> None:
         self.index_url = "https://www.douyin.com"
         self.playwright = None
         self.cookie_file = "douyin_cookies.json"  # Cookie文件路径
+        self.local_cache = ExpiringLocalCache()
 
     def load_cookies_from_file(self) -> List[Dict]:
         """从文件加载Cookie"""
@@ -77,6 +80,9 @@ class DouYinCrawler(AbstractCrawler):
             ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = self.format_proxy_info(ip_proxy_info)
+
+        # 启动本地缓存清理任务
+        await self.local_cache.start()
 
         self.playwright = await async_playwright().start()
         # Launch a browser context.
@@ -343,6 +349,9 @@ class DouYinCrawler(AbstractCrawler):
     async def close(self) -> None:
         """Close browser context"""
         try:
+            # 关闭本地缓存清理任务
+            await self.local_cache.stop()
+            
             if hasattr(self, 'browser_context') and self.browser_context:
                 await self.browser_context.close()
             if hasattr(self, 'playwright') and self.playwright:

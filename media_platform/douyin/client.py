@@ -883,19 +883,21 @@ class DOUYINClient(AbstractApiClient):
     async def get_messages(self) -> List[Dict]:
         """获取用户收到的消息"""
         try:
-            # 这里需要实现具体的消息获取API调用
-            # 示例实现，实际需要根据抖音的API进行调整
-            response = await self.session.get(
-                "https://www.douyin.com/aweme/v1/web/im/fetch/",
-                headers=self.headers
-            )
-            data = await response.json()
+            uri = "/aweme/v1/web/im/fetch/"
+            params = {
+                "cursor": 0,
+                "count": 20,
+                "type": 1
+            }
+            headers = copy.copy(self.headers)
+            headers["Referer"] = "https://www.douyin.com/im/"
             
-            if data.get("status_code") == 0:
-                return data.get("messages", [])
+            response = await self.get(uri, params, headers)
+            if response and response.get("status_code") == 0:
+                return response.get("messages", [])
             else:
-                utils.logger.error(f"Failed to get messages: {data}")
+                utils.logger.error(f"获取消息失败: {response}")
                 return []
         except Exception as e:
-            utils.logger.error(f"Error getting messages: {e}")
+            utils.logger.error(f"获取消息时发生错误: {e}")
             return []
