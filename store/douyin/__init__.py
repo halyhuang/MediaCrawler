@@ -66,12 +66,15 @@ async def update_douyin_aweme(aweme_item: Dict):
     aweme_id = aweme_item.get("aweme_id")
     user_info = aweme_item.get("author", {})
     interact_info = aweme_item.get("statistics", {})
+    create_time = aweme_item.get("create_time")
+    if create_time is None:
+        create_time = utils.get_current_timestamp()
     save_content_item = {
         "aweme_id": aweme_id,
         "aweme_type": str(aweme_item.get("aweme_type")),
         "title": aweme_item.get("desc", ""),
         "desc": aweme_item.get("desc", ""),
-        "create_time": aweme_item.get("create_time"),
+        "create_time": create_time,
         "user_id": user_info.get("uid"),
         "sec_uid": user_info.get("sec_uid"),
         "short_user_id": user_info.get("short_id"),

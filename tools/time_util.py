@@ -48,6 +48,8 @@ def get_time_str_from_unix_time(unixtime):
     :param unixtime:
     :return:
     """
+    if unixtime is None:
+        return get_current_time()
     if int(unixtime) > 1000000000000:
         unixtime = int(unixtime) / 1000
     return time.strftime('%Y-%m-%d %X', time.localtime(unixtime))
