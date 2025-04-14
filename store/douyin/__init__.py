@@ -161,6 +161,7 @@ async def save_creator(user_id: str, creator: Dict):
     local_db_item = {
         "user_id": user_id,
         "nickname": user_info.get("nickname"),
+        "unique_id": user_info.get("unique_id"),
         "gender": gender_map.get(user_info.get("gender"), "未知"),
         "avatar": f"https://p3-pc.douyinpic.com/img/{avatar_uri}"
         + r"~c5_300x300.jpeg?from=2956013662",
