@@ -157,6 +157,7 @@ CREATE TABLE `dy_creator`
     `avatar`         varchar(255) DEFAULT NULL COMMENT '用户头像地址',
     `ip_location`    varchar(255) DEFAULT NULL COMMENT '评论时的IP地址',
     `add_ts`         bigint       NOT NULL COMMENT '记录添加时间戳',
+    `add_time`       varchar(32)  DEFAULT NULL COMMENT '记录添加时间',
     `last_modify_ts` bigint       NOT NULL COMMENT '记录最后修改时间戳',
     `desc`           longtext COMMENT '用户描述',
     `gender`         varchar(1)   DEFAULT NULL COMMENT '性别',
