@@ -12,6 +12,7 @@
 import asyncio
 import os
 import random
+import json
 from asyncio import Task
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +41,35 @@ class DouYinCrawler(AbstractCrawler):
     def __init__(self) -> None:
         self.index_url = "https://www.douyin.com"
         self.playwright = None
+        self.cookie_file = "douyin_cookies.json"  # Cookie文件路径
+
+    def load_cookies_from_file(self) -> List[Dict]:
+        """从文件加载Cookie"""
+        try:
+            if os.path.exists(self.cookie_file):
+                with open(self.cookie_file, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                # 转换Cookie格式
+                formatted_cookies = []
+                for cookie in cookies:
+                    formatted_cookie = {
+                        'name': cookie.get('name', ''),
+                        'value': cookie.get('value', ''),
+                        'domain': cookie.get('domain', '.douyin.com'),
+                        'path': cookie.get('path', '/'),
+                        'sameSite': 'Lax',  # 设置sameSite属性
+                        'secure': cookie.get('secure', True),
+                        'httpOnly': cookie.get('httpOnly', True)
+                    }
+                    formatted_cookies.append(formatted_cookie)
+                utils.logger.info(f"成功从{self.cookie_file}加载Cookie")
+                return formatted_cookies
+            else:
+                utils.logger.warning(f"Cookie文件{self.cookie_file}不存在")
+                return []
+        except Exception as e:
+            utils.logger.error(f"加载Cookie文件失败: {str(e)}")
+            return []
 
     async def start(self) -> None:
         playwright_proxy_format, httpx_proxy_format = None, None
@@ -59,6 +89,13 @@ class DouYinCrawler(AbstractCrawler):
         )
         # stealth.min.js is a js script to prevent the website from detecting the crawler.
         await self.browser_context.add_init_script(path="libs/stealth.min.js")
+        
+        # 加载Cookie
+        cookies = self.load_cookies_from_file()
+        if cookies:
+            await self.browser_context.add_cookies(cookies)
+            utils.logger.info("已成功加载Cookie")
+            
         self.context_page = await self.browser_context.new_page()
         await self.context_page.goto(self.index_url)
 
@@ -73,6 +110,12 @@ class DouYinCrawler(AbstractCrawler):
             )
             await login_obj.begin()
             await self.dy_client.update_cookies(browser_context=self.browser_context)
+            
+            # 保存Cookie到文件
+            cookies = await self.browser_context.cookies()
+            with open(self.cookie_file, 'w', encoding='utf-8') as f:
+                json.dump(cookies, f, ensure_ascii=False, indent=2)
+            utils.logger.info(f"已保存Cookie到{self.cookie_file}")
 
         utils.logger.info("[DouYinCrawler.start] Douyin Crawler started successfully...")
 
