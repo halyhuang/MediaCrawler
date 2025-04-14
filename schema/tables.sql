@@ -159,6 +159,7 @@ CREATE TABLE `dy_creator`
     `add_ts`         bigint       NOT NULL COMMENT '记录添加时间戳',
     `add_time`       varchar(32)  DEFAULT NULL COMMENT '记录添加时间',
     `last_modify_ts` bigint       NOT NULL COMMENT '记录最后修改时间戳',
+    `last_modify_time` varchar(32)  DEFAULT NULL COMMENT '记录最后修改时间',
     `desc`           longtext COMMENT '用户描述',
     `gender`         varchar(1)   DEFAULT NULL COMMENT '性别',
     `follows`        varchar(16)  DEFAULT NULL COMMENT '关注数',
