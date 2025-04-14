@@ -243,20 +243,20 @@ class DouYinCrawler(AbstractCrawler):
         """
         Get the information and videos of the specified creator
         """
-        utils.logger.info("[DouYinCrawler.get_creators_and_videos] Begin get douyin creators")
+        utils.logger.info(f"[DouYinCrawler.get_creators_and_videos] Begin get douyin creators:{config.DY_CREATOR_ID_LIST}")
         for user_id in config.DY_CREATOR_ID_LIST:
             creator_info: Dict = await self.dy_client.get_user_info(user_id)
             if creator_info:
                 await douyin_store.save_creator(user_id, creator=creator_info)
 
             # Get all video information of the creator
-            all_video_list = await self.dy_client.get_all_user_aweme_posts(
-                sec_user_id=user_id,
-                callback=self.fetch_creator_video_detail
-            )
+            # all_video_list = await self.dy_client.get_all_user_aweme_posts(
+            #     sec_user_id=user_id,
+            #     callback=self.fetch_creator_video_detail
+            # )
 
-            video_ids = [video_item.get("aweme_id") for video_item in all_video_list]
-            await self.batch_get_note_comments(video_ids)
+            # video_ids = [video_item.get("aweme_id") for video_item in all_video_list]
+            # await self.batch_get_note_comments(video_ids)
 
     async def fetch_creator_video_detail(self, video_list: List[Dict]):
         """

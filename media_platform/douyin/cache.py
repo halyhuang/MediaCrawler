@@ -7,17 +7,21 @@ class ExpiringLocalCache:
         self._cache: Dict[str, Any] = {}
         self._clear_task = None
         self._expiration_times: Dict[str, float] = {}
+        self._running = False
 
     async def _start_clear_cron(self):
         """启动定时清理过期缓存的任务"""
         try:
-            while True:
+            while self._running:
                 await asyncio.sleep(60)  # 每分钟清理一次
                 await self._clear_expired()
         except asyncio.CancelledError:
             utils.logger.info("缓存清理任务已取消")
         except Exception as e:
             utils.logger.error(f"缓存清理任务出错: {e}")
+        finally:
+            self._running = False
+            self._clear_task = None
 
     async def _clear_expired(self):
         """清理过期的缓存项"""
@@ -34,19 +38,22 @@ class ExpiringLocalCache:
 
     async def start(self):
         """启动缓存清理任务"""
-        if self._clear_task is None:
+        if not self._running and self._clear_task is None:
+            self._running = True
             self._clear_task = asyncio.create_task(self._start_clear_cron())
             utils.logger.info("缓存清理任务已启动")
 
     async def stop(self):
         """停止缓存清理任务"""
-        if self._clear_task:
-            self._clear_task.cancel()
-            try:
-                await self._clear_task
-            except asyncio.CancelledError:
-                pass
-            self._clear_task = None
+        if self._running:
+            self._running = False
+            if self._clear_task:
+                self._clear_task.cancel()
+                try:
+                    await self._clear_task
+                except asyncio.CancelledError:
+                    pass
+                self._clear_task = None
             utils.logger.info("缓存清理任务已停止")
 
     def set(self, key: str, value: Any, expire_seconds: int = 300):

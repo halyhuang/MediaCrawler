@@ -883,14 +883,40 @@ class DOUYINClient(AbstractApiClient):
     async def get_messages(self) -> List[Dict]:
         """获取用户收到的消息"""
         try:
-            uri = "/aweme/v1/web/im/fetch/"
+            uri = "/web/api/v2/im/fetch/"
             params = {
                 "cursor": 0,
                 "count": 20,
-                "type": 1
+                "type": 1,
+                "device_platform": "webapp",
+                "aid": "6383",
+                "channel": "channel_pc_web",
+                "pc_client_type": "1",
+                "version_code": "190600",
+                "version_name": "19.6.0",
+                "cookie_enabled": "true",
+                "screen_width": "1920",
+                "screen_height": "1080",
+                "browser_language": "zh-CN",
+                "browser_platform": "Win32",
+                "browser_name": "Chrome",
+                "browser_version": "125.0.0.0",
+                "browser_online": "true",
+                "engine_name": "Blink",
+                "engine_version": "109.0",
+                "os_name": "Windows",
+                "os_version": "10",
+                "cpu_core_num": "8",
+                "device_memory": "8",
+                "platform": "PC",
+                "downlink": "10",
+                "effective_type": "4g",
+                "round_trip_time": "50",
+                "webid": get_web_id(),
             }
             headers = copy.copy(self.headers)
             headers["Referer"] = "https://www.douyin.com/im/"
+            headers["Origin"] = "https://www.douyin.com"
             
             response = await self.get(uri, params, headers)
             if response and response.get("status_code") == 0:

@@ -154,6 +154,7 @@ async def update_dy_aweme_comment(aweme_id: str, comment_item: Dict):
 
 
 async def save_creator(user_id: str, creator: Dict):
+    utils.logger.info(f"[store.douyin.save_creator] creator_info:{creator}")
     user_info = creator.get("user", {})
     gender_map = {0: "未知", 1: "男", 2: "女"}
     avatar_uri = user_info.get("avatar_300x300", {}).get("uri")
